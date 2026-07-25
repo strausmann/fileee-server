@@ -19,7 +19,11 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-          persist-credentials: false
+          # SSH-Deploy-Key: semantic-release pusht CHANGELOG+Tag ueber SSH (repositoryUrl in
+          # .releaserc.json ist SSH). Der Deploy-Key ist Bypass-Actor im main-Ruleset -> Push
+          # kommt an protected main vorbei (Bot/GITHUB_TOKEN kann auf persoenlichem Repo NICHT
+          # Ruleset-Bypass sein). @semantic-release/github nutzt weiter GITHUB_TOKEN fuer die API.
+          ssh-key: "${{ secrets.SSH_DEPLOY_KEY }}"
       - uses: actions/setup-node@v7
         with:
           node-version: "22"
