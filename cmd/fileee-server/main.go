@@ -11,6 +11,8 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"runtime/debug"
+	"strings"
 	"syscall"
 	"time"
 
@@ -32,13 +34,17 @@ const healthcheckTimeout = 5 * time.Second
 // jeder Infisical-/Config-Arbeit geprüft werden; (2) als eigentlicher Server-Boot. Die Reihenfolge
 // im Server-Zweig ist korrektheitskritisch: MaybeInjectInfisical (kann den Prozess per
 // syscall.Exec ersetzen und kehrt dann nie zurück) MUSS vor LoadConfig laufen, damit LoadConfig
-// bereits die injizierten Secrets sieht.
+// bereits die injizierten Secrets sieht. Ein früher, config-unabhängiger slog-Logger
+// (earlyLog, immer Info-Level nach stderr — die Config und damit FILEEE_LOG_LEVEL existiert an
+// dieser Stelle noch nicht) begleitet den Infisical-Dual-Mode-Boot mit sicheren
+// Diagnose-Logs (Secret-NAMEN, nie -Werte, siehe secrets.go MaybeInjectInfisical-Doku).
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == "healthcheck" {
 		os.Exit(runHealthcheck(healthcheckAddr(os.Getenv)))
 	}
 
-	if err := MaybeInjectInfisical(os.Getenv, runInfisicalCommand, execFileeeServer); err != nil {
+	earlyLog := slog.New(slog.NewJSONHandler(os.Stderr, nil))
+	if err := MaybeInjectInfisical(os.Getenv, runInfisicalCommand, execFileeeServer, earlyLog); err != nil {
 		fatal("Infisical-Dual-Mode fehlgeschlagen", err)
 	}
 
@@ -48,6 +54,7 @@ func main() {
 	}
 
 	log := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: logLevel(cfg.LogLevel)}))
+	logStartupBanner(log, resolveVersion(), debug.ReadBuildInfo, infisicalVersionCommand)
 
 	fc, err := fileee.New(
 		fileee.Credentials{
@@ -80,6 +87,12 @@ func main() {
 
 	stopKeepAlive := fc.StartKeepAlive(rootCtx, cfg.KeepAliveInterval)
 	defer stopKeepAlive()
+
+	// Boot-Selbsttest (FILEEE_BOOT_SELFCHECK, Default false — reverse-engineered Fileee
+	// schonen, siehe config.go): läuft nicht-blockierend nebenläufig, damit ein langsames oder
+	// vorübergehend gestörtes Fileee den HTTP-Server-Start nicht verzögert. runBootSelfcheck
+	// selbst no-opt, wenn cfg.BootSelfcheck false ist (siehe selfcheck.go).
+	go runBootSelfcheck(rootCtx, cfg.BootSelfcheck, fc, log)
 
 	apiServer := NewServer(cfg, fc, sc, log)
 
@@ -161,6 +174,19 @@ func healthcheckAddr(getenv func(string) string) string {
 // exec.Cmd.Output-Doku).
 func runInfisicalCommand(name string, args ...string) ([]byte, error) {
 	return exec.Command(name, args...).Output()
+}
+
+// infisicalVersionCommand ist die infisicalVersionFn-Injektion für logStartupBanner im echten
+// Server-Boot: fragt `/infisical --version` ab und liefert die getrimmte Ausgabe. Fehlt die
+// Binary (reiner Env-Modus ohne Infisical-Dual-Mode) oder schlägt der Aufruf aus einem anderen
+// Grund fehl, wird der Fehler unverändert zurückgegeben — logStartupBanner degradiert das dann
+// zu "unavailable", statt den Boot zu blockieren (siehe banner.go-Doku).
+func infisicalVersionCommand() (string, error) {
+	out, err := exec.Command(infisicalBinary, "--version").Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
 }
 
 // execFileeeServer ist die execServer-Injektion für MaybeInjectInfisical im echten Server-Boot:
