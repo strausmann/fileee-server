@@ -39,6 +39,9 @@ Thumbs.db
 go.work
 go.work.sum
 
+# Node-Tooling (Release/Commit, kein Publish)
+node_modules/
+
 # Build-Artefakte
 /tmp/
 
