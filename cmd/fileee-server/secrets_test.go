@@ -1,11 +1,21 @@
 package main
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
+	"io"
+	"log/slog"
 	"strings"
 	"testing"
 )
+
+// discardLogger liefert einen slog.Logger, der jede Ausgabe verwirft — für Tests, die
+// MaybeInjectInfisical aufrufen müssen (neuer log-Parameter), aber den Log-INHALT nicht prüfen
+// (das übernehmen die dedizierten TestMaybeInjectInfisical_Logs*-Tests unten).
+func discardLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(io.Discard, nil))
+}
 
 // infisicalRequiredEnv liefert die Pflicht-Variablen für einen erfolgreichen Infisical-Modus
 // (Universal Auth + Env/Path/Domain/ProjectID gesetzt) als Basis für Tests.
@@ -114,7 +124,7 @@ func TestMaybeInjectInfisical_NoOpWhenNotWanted(t *testing.T) {
 		return nil
 	}
 
-	if err := MaybeInjectInfisical(getenv, run, execServer); err != nil {
+	if err := MaybeInjectInfisical(getenv, run, execServer, discardLogger()); err != nil {
 		t.Fatalf("erwartet nil, bekam %v", err)
 	}
 	if runCalled || execCalled {
@@ -139,7 +149,7 @@ func TestMaybeInjectInfisical_MissingEnvIsError(t *testing.T) {
 		return nil
 	}
 
-	err := MaybeInjectInfisical(getenv, run, execServer)
+	err := MaybeInjectInfisical(getenv, run, execServer, discardLogger())
 	if err == nil {
 		t.Fatal("erwartet Fehler bei fehlendem INFISICAL_ENV")
 	}
@@ -181,7 +191,7 @@ func TestMaybeInjectInfisical_HappyPath(t *testing.T) {
 		return nil
 	}
 
-	if err := MaybeInjectInfisical(getenv, run, execServer); err != nil {
+	if err := MaybeInjectInfisical(getenv, run, execServer, discardLogger()); err != nil {
 		t.Fatalf("erwartet nil, bekam %v", err)
 	}
 
@@ -226,7 +236,7 @@ func TestMaybeInjectInfisical_LoginErrorPropagates(t *testing.T) {
 		return nil
 	}
 
-	err := MaybeInjectInfisical(getenv, run, execServer)
+	err := MaybeInjectInfisical(getenv, run, execServer, discardLogger())
 	if err == nil || !errors.Is(err, wantErr) {
 		t.Fatalf("erwartet gewrappten wantErr, bekam %v", err)
 	}
@@ -250,7 +260,7 @@ func TestMaybeInjectInfisical_ExportErrorPropagates(t *testing.T) {
 		return nil
 	}
 
-	err := MaybeInjectInfisical(getenv, run, execServer)
+	err := MaybeInjectInfisical(getenv, run, execServer, discardLogger())
 	if err == nil || !errors.Is(err, wantErr) {
 		t.Fatalf("erwartet gewrappten wantErr, bekam %v", err)
 	}
@@ -274,7 +284,7 @@ func TestMaybeInjectInfisical_ExecServerErrorPropagates(t *testing.T) {
 		return wantErr
 	}
 
-	err := MaybeInjectInfisical(getenv, run, execServer)
+	err := MaybeInjectInfisical(getenv, run, execServer, discardLogger())
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("erwartet wantErr unverändert, bekam %v", err)
 	}
@@ -296,7 +306,7 @@ func TestMaybeInjectInfisical_UsesDefaultPath(t *testing.T) {
 	}
 	execServer := func([]string) error { return nil }
 
-	if err := MaybeInjectInfisical(getenv, run, execServer); err != nil {
+	if err := MaybeInjectInfisical(getenv, run, execServer, discardLogger()); err != nil {
 		t.Fatalf("erwartet nil, bekam %v", err)
 	}
 	if !containsExact(exportArgs, "--path=/") {
@@ -312,4 +322,84 @@ func containsExact(s []string, want string) bool {
 		}
 	}
 	return false
+}
+
+// TestMaybeInjectInfisical_LogsKeyNamesNotValues ist der PFLICHT-Secret-Safety-Test (analog zum
+// Muster in go-fileee/fileee/logging_test.go TestWithLogger_EmitsRequestDebugEvents): das
+// geloggte Boot-Diagnostics-Log des Infisical-Dual-Mode-Boots MUSS die exportierten Secret-
+// SCHLÜSSELNAMEN enthalten (damit ein Operator sieht, WAS geladen wurde), darf aber NIEMALS
+// einen der zugehörigen Secret-WERTE enthalten — auch nicht in maskierter Teilform. Prüft
+// zusätzlich, dass "Infisical-Modus aktiv" (mit project_id/env/path) und "Login OK" als eigene
+// Log-Einträge erscheinen.
+func TestMaybeInjectInfisical_LogsKeyNamesNotValues(t *testing.T) {
+	var buf bytes.Buffer
+	log := slog.New(slog.NewTextHandler(&buf, nil))
+
+	env := infisicalRequiredEnv()
+	getenv := func(k string) string { return env[k] }
+
+	run := func(name string, args ...string) ([]byte, error) {
+		if len(args) > 0 && args[0] == "login" {
+			return []byte("mint-token-123\n"), nil
+		}
+		return []byte("FILEEE_USERNAME=alice\nFILEEE_PASSWORD=\"s3cr3t-value-42\"\n"), nil
+	}
+	execServer := func([]string) error { return nil }
+
+	if err := MaybeInjectInfisical(getenv, run, execServer, log); err != nil {
+		t.Fatalf("erwartet nil, bekam %v", err)
+	}
+
+	out := buf.String()
+
+	// Positiv: Schlüsselnamen UND die drei erwarteten Log-Nachrichten müssen auftauchen.
+	for _, want := range []string{
+		"Infisical-Modus aktiv",
+		"proj-123", // project_id
+		"prod",     // env
+		"Login OK",
+		"FILEEE_USERNAME",
+		"FILEEE_PASSWORD",
+		"2 Secrets geladen",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("Log fehlt %q, war:\n%s", want, out)
+		}
+	}
+
+	// Negativ: kein Secret-WERT darf je im Log auftauchen — weder der geminteten Token noch
+	// die exportierten Secret-Werte (Username-Wert "alice" ist hier bewusst NICHT als
+	// klassisches "Secret" behandelt, sondern als Positivkontrolle: selbst ein harmloser
+	// Wert darf nicht mitgeloggt werden, nur der SchlüsselNAME "FILEEE_USERNAME").
+	for _, forbidden := range []string{"mint-token-123", "s3cr3t-value-42", "alice"} {
+		if strings.Contains(out, forbidden) {
+			t.Errorf("Log enthält Secret-Wert %q:\n%s", forbidden, out)
+		}
+	}
+}
+
+// TestMaybeInjectInfisical_LogsZeroSecretsWhenExportEmpty prüft den Randfall eines leeren
+// Infisical-Exports (kein Secret im konfigurierten Pfad/Environment): "0 Secrets geladen" wird
+// geloggt statt eines Fehlers oder einer leeren/verwirrenden Nachricht.
+func TestMaybeInjectInfisical_LogsZeroSecretsWhenExportEmpty(t *testing.T) {
+	var buf bytes.Buffer
+	log := slog.New(slog.NewTextHandler(&buf, nil))
+
+	env := infisicalRequiredEnv()
+	getenv := func(k string) string { return env[k] }
+
+	run := func(name string, args ...string) ([]byte, error) {
+		if len(args) > 0 && args[0] == "login" {
+			return []byte("tok\n"), nil
+		}
+		return []byte(""), nil
+	}
+	execServer := func([]string) error { return nil }
+
+	if err := MaybeInjectInfisical(getenv, run, execServer, log); err != nil {
+		t.Fatalf("erwartet nil, bekam %v", err)
+	}
+	if !strings.Contains(buf.String(), "0 Secrets geladen") {
+		t.Errorf("erwartet '0 Secrets geladen' im Log, war:\n%s", buf.String())
+	}
 }
