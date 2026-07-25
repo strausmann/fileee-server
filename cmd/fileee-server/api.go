@@ -10,7 +10,10 @@ import (
 // newAPI konfiguriert eine Huma-API auf mux und liefert sie zurück. huma.DefaultConfig setzt
 // die Standardpfade OpenAPIPath "/openapi" (→ Routen /openapi.json und /openapi.yaml) und
 // DocsPath "/docs" — humago.New registriert diese Routen selbst auf mux, ein manuelles
-// mux.HandleFunc dafür ist weder nötig noch vorgesehen.
+// mux.HandleFunc dafür ist weder nötig noch vorgesehen. Die Versionsangabe kommt aus
+// resolveVersion() (version.go, #17) statt aus einer hardcodierten Konstante — dieselbe
+// Quelle speist auch den Startup-Banner (banner.go) und das OCI-Label
+// org.opencontainers.image.version (deploy/Dockerfile, per ldflags-Override).
 //
 // BEWUSST KEIN globaler huma.NewError-Override: Der ursprüngliche Task-Brief-Wortlaut
 // ("Huma-CreateHooks/Error-Transformer auf mapError verweisen") ist durch die spätere,
@@ -24,6 +27,6 @@ import (
 // stattdessen direkt mapError(err) zurück, das den fileee-server-eigenen schlanken
 // {error, code}-Body erzeugt (errors.go). Beide Fehlerformen existieren bewusst nebeneinander.
 func newAPI(mux *http.ServeMux) huma.API {
-	config := huma.DefaultConfig("fileee-server", version)
+	config := huma.DefaultConfig("fileee-server", resolveVersion())
 	return humago.New(mux, config)
 }
