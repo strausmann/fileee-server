@@ -1,6 +1,8 @@
 # fileee-server
 
 [![CI](https://github.com/strausmann/fileee-server/actions/workflows/test.yml/badge.svg)](https://github.com/strausmann/fileee-server/actions/workflows/test.yml)
+[![Go Report Card](https://goreportcard.com/badge/github.com/strausmann/fileee-server)](https://goreportcard.com/report/github.com/strausmann/fileee-server)
+[![Release](https://img.shields.io/github/v/release/strausmann/fileee-server)](https://github.com/strausmann/fileee-server/releases)
 [![Go Version](https://img.shields.io/github/go-mod/go-version/strausmann/fileee-server)](go.mod)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
