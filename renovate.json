@@ -1,21 +1,61 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["config:recommended", ":semanticCommits", ":enableVulnerabilityAlerts"],
+  "extends": [
+    "config:recommended",
+    ":semanticCommits",
+    ":enableVulnerabilityAlerts"
+  ],
   "minimumReleaseAge": "3 days",
   "packageRules": [
-    { "matchUpdateTypes": ["minor", "patch", "pin", "digest"], "automerge": true },
-    { "matchDepTypes": ["devDependencies"], "automerge": true },
-    { "matchManagers": ["github-actions", "dockerfile"], "automerge": true },
-    { "matchUpdateTypes": ["major"], "automerge": false }
+    {
+      "matchUpdateTypes": [
+        "minor",
+        "patch",
+        "pin",
+        "digest"
+      ],
+      "automerge": true
+    },
+    {
+      "matchDepTypes": [
+        "devDependencies"
+      ],
+      "automerge": true
+    },
+    {
+      "matchManagers": [
+        "github-actions",
+        "dockerfile"
+      ],
+      "automerge": true
+    },
+    {
+      "matchUpdateTypes": [
+        "major"
+      ],
+      "automerge": false
+    },
+    {
+      "matchPackageNames": [
+        "github.com/strausmann/go-fileee"
+      ],
+      "minimumReleaseAge": "0",
+      "description": "Interne Lib: sofort (kein Stabilitaets-Delay), damit fileee-server die frische go-fileee-Version in derselben Nacht zieht. Automerge kommt aus den Typ-Regeln (minor/patch=ja, major=manuell)."
+    }
   ],
   "customManagers": [
     {
       "customType": "regex",
-      "managerFilePatterns": ["/^deploy/Dockerfile$/"],
-      "matchStrings": ["INFISICAL_CLI_VERSION=(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)"],
+      "managerFilePatterns": [
+        "/^deploy/Dockerfile$/"
+      ],
+      "matchStrings": [
+        "INFISICAL_CLI_VERSION=(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)"
+      ],
       "depNameTemplate": "Infisical/infisical",
       "datasourceTemplate": "github-releases",
       "extractVersionTemplate": "^infisical-cli/v(?<version>.*)$"
     }
-  ]
+  ],
+  "platformAutomerge": true
 }
