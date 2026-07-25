@@ -82,9 +82,20 @@ jobs:
             done
             echo 'TAGS'
           } >> "$GITHUB_OUTPUT"
+      - name: Build-Metadaten für OCI-Labels/ldflags ermitteln
+        id: meta
+        run: echo "created=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
       - uses: docker/build-push-action@v7
         with:
           context: .
           file: deploy/Dockerfile
           push: true
           tags: ${{ steps.tags.outputs.list }}
+          # VERSION/REVISION/CREATED speisen sowohl die OCI-Labels (org.opencontainers.image.*,
+          # deploy/Dockerfile) als auch den ldflags-Override von cmd/fileee-server/version.go
+          # (main.version) — dieselbe Versionsquelle wie das OpenAPI info.version zur Laufzeit
+          # (Fixes #17).
+          build-args: |
+            VERSION=${{ needs.release.outputs.version }}
+            REVISION=${{ github.sha }}
+            CREATED=${{ steps.meta.outputs.created }}
