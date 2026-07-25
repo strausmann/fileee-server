@@ -1,0 +1,61 @@
+name: test
+on:
+  push:
+    branches: [main]
+  pull_request:
+concurrency:
+  group: test-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      CGO_ENABLED: "0"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+      - run: go build ./...
+      - run: go vet ./...
+      # -race braucht cgo (Race-Detector-Runtime); der Server-Build selbst bleibt pure-Go
+      # (go build/vet oben laufen mit CGO_ENABLED=0). Nur diese Stufe aktiviert cgo.
+      - name: Test (race + coverage)
+        env:
+          CGO_ENABLED: "1"
+        run: go test ./... -race -coverprofile=cover.out
+      - name: Coverage-Gate (test-coverage-pflicht.md)
+        run: |
+          chmod +x scripts/coverage-gate-strict.sh
+          # Schwellen sind an die tatsächlich gemessene Coverage angelehnt (Stand 2026-07-25,
+          # `go test ./... -race -coverprofile=cover.out` gegen HEAD von main, gefolgt von
+          # `go tool cover -func=cover.out` gruppiert per Datei), NICHT an aspirationale
+          # Zielwerte — ein Gate, das ab Tag 1 rot ist, verliert seine Wirkung (siehe
+          # homelab-management test-coverage-pflicht.md "GOLDENE REGEL"). Jede Schwelle liegt
+          # mit Sicherheitsabstand (Floor, nicht Ziel) unter dem gemessenen Wert:
+          #   auth.go 100.0→90, config.go 100.0→90, secrets.go 100.0→90, server.go 100.0→90,
+          #   handlers_destructive.go 100.0→90, accesslog.go 96.1→85, watch.go 97.4→85,
+          #   handlers_conversations.go 94.6→80, handlers_share.go 89.2→75, resolve.go 88.9→75,
+          #   errors.go 80.0→70, handlers_entities.go 78.0→65, handlers_documents.go 59.9→50
+          #   (handlers_documents.go hat mehrere 0%-Handler ohne eigenen Test — z.B.
+          #   handleListDocuments, decodeCursor, handleDownloadDocumentPDF,
+          #   handleDownloadPageImage — Schwelle bewusst niedrig statt der
+          #   Business-Logic-Zieltabelle 80%, bis eigene Tests nachgezogen sind).
+          ./scripts/coverage-gate-strict.sh cover.out \
+            cmd/fileee-server/auth.go:90 \
+            cmd/fileee-server/config.go:90 \
+            cmd/fileee-server/secrets.go:90 \
+            cmd/fileee-server/server.go:90 \
+            cmd/fileee-server/handlers_destructive.go:90 \
+            cmd/fileee-server/accesslog.go:85 \
+            cmd/fileee-server/watch.go:85 \
+            cmd/fileee-server/handlers_conversations.go:80 \
+            cmd/fileee-server/handlers_share.go:75 \
+            cmd/fileee-server/resolve.go:75 \
+            cmd/fileee-server/errors.go:70 \
+            cmd/fileee-server/handlers_entities.go:65 \
+            cmd/fileee-server/handlers_documents.go:50
+      - name: Doc-Coverage (exportierte Symbole)
+        run: |
+          chmod +x scripts/doc-coverage.sh
+          ./scripts/doc-coverage.sh
