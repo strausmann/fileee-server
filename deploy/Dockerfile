@@ -10,10 +10,10 @@
 # =============================================================================
 # Build-Stage
 # =============================================================================
-# go.mod pinnt "go 1.23.0" OHNE toolchain-Override (siehe `grep '^go \|toolchain' go.mod`)
-# -> golang:1.23-bookworm erfüllt das exakt, kein GOTOOLCHAIN-Zwangsupgrade nötig
-# und GOTOOLCHAIN=local ist deshalb unproblematisch (Go würde sonst versuchen,
-# eine neuere Toolchain nachzuladen, wenn go.mod eine höhere Version verlangt).
+# go.mod verlangt "go 1.25.0" OHNE toolchain-Override (siehe `grep '^go \|toolchain' go.mod`)
+# -> golang:1.26-bookworm erfüllt das (1.26 >= 1.25), kein GOTOOLCHAIN-Zwangsupgrade nötig
+# und GOTOOLCHAIN=local ist deshalb unproblematisch (Go müsste sonst eine neuere
+# Toolchain nachladen, wenn das Image-Go älter als die go.mod-Vorgabe wäre).
 FROM golang:1.26-bookworm AS build
 
 # Infisical-CLI-Version.
