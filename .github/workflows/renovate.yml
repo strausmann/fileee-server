@@ -4,7 +4,7 @@ name: renovate
 # damit die geoeffneten PRs auch die CI-Checks triggern (der Standard-GITHUB_TOKEN kann das nicht).
 on:
   schedule:
-    - cron: "0 6 * * 1"   # Montag 06:00 UTC
+    - cron: "0 4 * * *"   # taeglich 04:00 UTC — Kaskade 3/4: fileee-server Renovate (nach go-fileee-Release)
   workflow_dispatch:
 permissions:
   contents: read
