@@ -60,13 +60,26 @@ jobs:
         with:
           username: ${{ env.DOCKERHUB_USERNAME }}
           password: ${{ env.DOCKERHUB_TOKEN }}
+      - name: Image-Tags berechnen (semver-kaskade major/minor/patch + latest)
+        id: tags
+        env:
+          V: ${{ needs.release.outputs.version }}
+        run: |
+          major=${V%%.*}
+          minor=${V%.*}
+          {
+            echo 'list<<TAGS'
+            for img in ghcr.io/strausmann/fileee-server strausmann/fileee-server; do
+              echo "$img:$V"
+              echo "$img:$minor"
+              echo "$img:$major"
+              echo "$img:latest"
+            done
+            echo 'TAGS'
+          } >> "$GITHUB_OUTPUT"
       - uses: docker/build-push-action@v6
         with:
           context: .
           file: deploy/Dockerfile
           push: true
-          tags: |
-            ghcr.io/strausmann/fileee-server:${{ needs.release.outputs.version }}
-            ghcr.io/strausmann/fileee-server:latest
-            strausmann/fileee-server:${{ needs.release.outputs.version }}
-            strausmann/fileee-server:latest
+          tags: ${{ steps.tags.outputs.list }}
