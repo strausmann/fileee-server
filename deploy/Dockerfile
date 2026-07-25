@@ -14,7 +14,7 @@
 # -> golang:1.23-bookworm erfüllt das exakt, kein GOTOOLCHAIN-Zwangsupgrade nötig
 # und GOTOOLCHAIN=local ist deshalb unproblematisch (Go würde sonst versuchen,
 # eine neuere Toolchain nachzuladen, wenn go.mod eine höhere Version verlangt).
-FROM golang:1.23-bookworm AS build
+FROM golang:1.26-bookworm AS build
 
 # Infisical-CLI-Version.
 #
