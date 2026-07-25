@@ -85,6 +85,12 @@ type Config struct {
 	UserAgent string
 	// LogLevel steuert das Log-Level des Servers (FILEEE_LOG_LEVEL, Default "info").
 	LogLevel string
+
+	// BootSelfcheck schaltet einen einzelnen leichten Lese-Roundtrip gegen Fileee
+	// (EnsureSession + UserID) direkt nach dem Boot frei (FILEEE_BOOT_SELFCHECK, Default
+	// false — das reverse-engineered, undokumentierte Fileee-API wird dadurch standardmäßig
+	// NICHT mit zusätzlichem Boot-Traffic belastet; siehe selfcheck.go).
+	BootSelfcheck bool
 }
 
 // String liefert eine für Logs und Debug-Ausgaben sichere Textdarstellung von Config: die vier
@@ -142,6 +148,7 @@ func LoadConfig(getenv func(string) string) (Config, error) {
 		WatchInterval:     getDuration(getenv, "FILEEE_WATCH_INTERVAL", 0),
 		UserAgent:         getString(getenv, "FILEEE_USER_AGENT", ""),
 		LogLevel:          getString(getenv, "FILEEE_LOG_LEVEL", "info"),
+		BootSelfcheck:     getBool(getenv, "FILEEE_BOOT_SELFCHECK", false),
 	}
 
 	var missing []string

@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"strings"
 )
@@ -74,22 +75,45 @@ func unquote(s string) string {
 	return s
 }
 
+// secretKeyNames extrahiert NUR die Schlüsselnamen aus einer Liste von "KEY=VALUE"-Strings (wie
+// von parseDotenv geliefert) — für sicheres Boot-Diagnostics-Logging (MaybeInjectInfisical):
+// niemals der Wert, nur der Name, damit ein Operator sieht, WELCHE Secrets geladen wurden, ohne
+// dass deren Werte je in einem Log-Sink landen (siehe secret-safe-config-inspection-Regel).
+func secretKeyNames(kv []string) []string {
+	keys := make([]string, 0, len(kv))
+	for _, entry := range kv {
+		key, _, _ := strings.Cut(entry, "=")
+		keys = append(keys, key)
+	}
+	return keys
+}
+
 // MaybeInjectInfisical prüft via wantInfisical, ob der Infisical-Dual-Mode aktiv sein soll, und
 // führt ihn im Erfolgsfall komplett aus: Token minten (`infisical login`), Secrets als dotenv
 // exportieren (`infisical export`), in die Prozess-Umgebung mergen, und den Server-Prozess per
 // execServer ersetzen (der Server bleibt/wird dabei PID 1 — siehe fileeeServerBinary-Kommentar).
 // Ist der Infisical-Modus nicht gewünscht (Env-Modus oder bereits re-exec't), ist der Aufruf ein
-// reines No-Op (nil-Rückgabe, weder run noch execServer werden aufgerufen).
+// reines No-Op (nil-Rückgabe, weder run noch execServer werden aufgerufen, log bleibt stumm).
 //
 // run und execServer sind injiziert, damit Tests den echten CLI-Aufruf bzw. syscall.Exec durch
 // Fakes ersetzen können, ohne einen echten Prozessersatz oder eine echte infisical-CLI zu
 // benötigen. INFISICAL_ENV ist im Infisical-Modus Pflicht — die infisical-CLI würde sonst
 // stillschweigend auf ihren Default "dev" zurückfallen, was in einer Produktionsumgebung
 // fatal wäre (siehe secret-environment-awareness-Regel).
+//
+// log ist der frühe, config-unabhängige slog-Logger (main.go: earlyLog, VOR LoadConfig gebaut,
+// weil MaybeInjectInfisical selbst vor LoadConfig läuft — siehe main()-Doku). Er begleitet den
+// Boot mit drei SECRET-SAFEN Diagnose-Log-Einträgen: "Infisical-Modus aktiv" (project_id/env/
+// path), "Login OK" (nach erfolgreichem Token-Mint, VOR dem Export), und "N Secrets geladen:
+// KEY1, KEY2, …" NACH dem Export — LETZTERER NUR mit den Schlüssel-NAMEN aus parseDotenv
+// (secretKeyNames), NIEMALS mit den zugehörigen Werten (siehe
+// secret-safe-config-inspection-Regel; TestMaybeInjectInfisical_LogsKeyNamesNotValues prüft das
+// explizit gegen echte Beispielwerte).
 func MaybeInjectInfisical(
 	getenv func(string) string,
 	run func(name string, args ...string) ([]byte, error),
 	execServer func(env []string) error,
+	log *slog.Logger,
 ) error {
 	if !wantInfisical(getenv) {
 		return nil
@@ -106,6 +130,8 @@ func MaybeInjectInfisical(
 		return fmt.Errorf("INFISICAL_ENV ist im Infisical-Modus Pflicht (CLI-Default \"dev\" wäre für prod falsch)")
 	}
 
+	log.Info("Infisical-Modus aktiv", "project_id", projectID, "env", env, "path", path)
+
 	tokenOut, err := run(infisicalBinary, "login", "--method=universal-auth",
 		"--client-id="+clientID, "--client-secret="+clientSecret, "--domain="+domain,
 		"--plain", "--silent")
@@ -113,6 +139,7 @@ func MaybeInjectInfisical(
 		return fmt.Errorf("infisical login fehlgeschlagen: %w", err)
 	}
 	token := strings.TrimSpace(string(tokenOut))
+	log.Info("Login OK")
 
 	dotenv, err := run(infisicalBinary, "export", "--format=dotenv",
 		"--token="+token, "--projectId="+projectID, "--env="+env, "--path="+path,
@@ -121,7 +148,11 @@ func MaybeInjectInfisical(
 		return fmt.Errorf("infisical export fehlgeschlagen: %w", err)
 	}
 
-	merged := append(append([]string{}, os.Environ()...), parseDotenv(dotenv)...)
+	parsed := parseDotenv(dotenv)
+	keys := secretKeyNames(parsed)
+	log.Info(fmt.Sprintf("%d Secrets geladen: %s", len(keys), strings.Join(keys, ", ")))
+
+	merged := append(append([]string{}, os.Environ()...), parsed...)
 	merged = append(merged, reexecSentinelEnv+"=1")
 
 	return execServer(merged)

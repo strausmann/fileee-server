@@ -16,6 +16,15 @@
 # Toolchain nachladen, wenn das Image-Go älter als die go.mod-Vorgabe wäre).
 FROM golang:1.26-bookworm AS build
 
+# Build-Metadaten für die Version (ldflags-Override, siehe cmd/fileee-server/version.go
+# resolveVersion) UND die OCI-Labels weiter unten. Defaults ("dev"/"unknown") gelten für einen
+# lokalen `docker build .` ohne --build-arg — der CI-Release-Workflow (.github/workflows/
+# release.yml, docker-Job) setzt alle drei explizit aus dem semantic-release-Tag, der Git-SHA
+# und der Build-Zeit (RFC3339).
+ARG VERSION=dev
+ARG REVISION=unknown
+ARG CREATED=unknown
+
 # Infisical-CLI-Version.
 #
 # WICHTIG (Korrektur gegenüber Task-Brief/Design-Spec): Die dort genannte Version
@@ -42,8 +51,10 @@ COPY . .
 
 # CGO_ENABLED=0 erzwingt ein vollstatisches Go-Binary (kein libc-Link) — Pflicht
 # für das shell- und libc-lose distroless/static-Runtime-Image weiter unten.
+# -X main.version=${VERSION} setzt cmd/fileee-server/version.go's ldflags-Override — resolveVersion
+# bevorzugt diesen Wert vor dem runtime/debug.ReadBuildInfo-Fallback (Fixes #17).
 ENV CGO_ENABLED=0 GOOS=linux GOARCH=amd64
-RUN go build -trimpath -ldflags="-s -w" -o /fileee-server ./cmd/fileee-server
+RUN go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" -o /fileee-server ./cmd/fileee-server
 
 # Statische Infisical-CLI holen (offizielles Release-Binary, kein Drittanbieter-
 # Mirror), Checksumme UND Staticness verifizieren, bevor sie ins Runtime-Image
@@ -68,6 +79,23 @@ RUN set -eux; \
 # Enthält das CA-Zertifikats-Bundle (Pflicht für HTTPS gegen my.fileee.com und
 # ggf. secretsmanager.strausmann.cloud im Infisical-Dual-Mode).
 FROM gcr.io/distroless/static-debian12:nonroot
+
+# ARGs müssen in JEDER Stage, die sie nutzt, neu deklariert werden (Docker-Multi-Stage-Regel) —
+# der Build-Stage-Wert wird NICHT automatisch vererbt.
+ARG VERSION=dev
+ARG REVISION=unknown
+ARG CREATED=unknown
+
+# OCI-Labels (HomeLab-Standard, siehe documentation-policy.md — ALLE Images tragen diese
+# Labels). VERSION/REVISION/CREATED kommen aus den Build-ARGs oben (CI setzt sie explizit,
+# siehe .github/workflows/release.yml docker-Job); title/description/licenses sind statisch.
+LABEL org.opencontainers.image.source="https://github.com/strausmann/fileee-server" \
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.revision="${REVISION}" \
+      org.opencontainers.image.created="${CREATED}" \
+      org.opencontainers.image.licenses="MIT" \
+      org.opencontainers.image.title="fileee-server" \
+      org.opencontainers.image.description="REST-API-Wrapper um die go-fileee Core-Lib hinter einem statischen API-Token, fuer N8N-Workflows und CI-Automatisierung ohne direkten Fileee-Login."
 
 COPY --from=build --chmod=755 /fileee-server /infisical /
 

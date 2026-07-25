@@ -8,11 +8,6 @@ import (
 	"github.com/strausmann/go-fileee/fileee"
 )
 
-// version ist die Server-Versionsangabe, die Huma in der OpenAPI-Info (`info.version`) und
-// in der Docs-UI ausweist. Config (config.go) trägt bewusst KEIN eigenes Versionsfeld — die
-// Binary-Version ist ein Build-Constant, keine Laufzeit-Einstellung.
-const version = "0.1.0"
-
 // Server bündelt die Laufzeitabhängigkeiten von fileee-server: die geladene Konfiguration, den
 // bereits gegen Fileee verdrahteten Core-Lib-Client, den credential-losen ShareClient für den
 // anonymen Share-Proxy (Task 9) und den strukturierten Logger. Server hält darüber hinaus KEINEN

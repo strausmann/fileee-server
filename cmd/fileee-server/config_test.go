@@ -59,6 +59,7 @@ func TestLoadConfig_AllDefaults(t *testing.T) {
 		WatchInterval:     0,
 		UserAgent:         "",
 		LogLevel:          "info",
+		BootSelfcheck:     false,
 	}
 	if !reflect.DeepEqual(c, want) {
 		t.Fatalf("Defaults weichen ab:\n got: %+v\nwant: %+v", c, want)
@@ -87,6 +88,7 @@ func TestLoadConfig_Overrides(t *testing.T) {
 	env["FILEEE_WATCH_INTERVAL"] = "30s"
 	env["FILEEE_USER_AGENT"] = "fileee-server-test/1.0"
 	env["FILEEE_LOG_LEVEL"] = "debug"
+	env["FILEEE_BOOT_SELFCHECK"] = "true"
 
 	c, err := LoadConfig(func(k string) string { return env[k] })
 	if err != nil {
@@ -151,6 +153,9 @@ func TestLoadConfig_Overrides(t *testing.T) {
 	}
 	if c.LogLevel != "debug" {
 		t.Errorf("LogLevel = %q", c.LogLevel)
+	}
+	if !c.BootSelfcheck {
+		t.Error("BootSelfcheck sollte true sein")
 	}
 
 	// FILEEE_ALLOW_DESTRUCTIVE="1" ist die zweite akzeptierte Bool-Schreibweise.

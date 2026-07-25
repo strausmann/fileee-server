@@ -36,7 +36,10 @@ jobs:
           #   auth.go 100.0→90, config.go 100.0→90, secrets.go 100.0→90, server.go 100.0→90,
           #   handlers_destructive.go 100.0→90, accesslog.go 96.1→85, watch.go 97.4→85,
           #   handlers_conversations.go 94.6→80, handlers_share.go 89.2→75, resolve.go 88.9→75,
-          #   errors.go 80.0→70, handlers_entities.go 78.0→65, handlers_documents.go 59.9→50
+          #   errors.go 80.0→70, handlers_entities.go 78.0→65, handlers_documents.go 59.9→50,
+          #   version.go 100.0→90, banner.go 100.0→90, selfcheck.go 100.0→90 (die drei neuen
+          #   Boot-Diagnostics-Dateien, Issue #17/Enhancement-Bündel "Boot-Diagnostics +
+          #   Versionsbanner + OCI-Labels")
           #   (handlers_documents.go hat mehrere 0%-Handler ohne eigenen Test — z.B.
           #   handleListDocuments, decodeCursor, handleDownloadDocumentPDF,
           #   handleDownloadPageImage — Schwelle bewusst niedrig statt der
@@ -54,7 +57,10 @@ jobs:
             cmd/fileee-server/resolve.go:75 \
             cmd/fileee-server/errors.go:70 \
             cmd/fileee-server/handlers_entities.go:65 \
-            cmd/fileee-server/handlers_documents.go:50
+            cmd/fileee-server/handlers_documents.go:50 \
+            cmd/fileee-server/version.go:90 \
+            cmd/fileee-server/banner.go:90 \
+            cmd/fileee-server/selfcheck.go:90
       - name: Doc-Coverage (exportierte Symbole)
         run: |
           chmod +x scripts/doc-coverage.sh
