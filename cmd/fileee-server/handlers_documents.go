@@ -338,7 +338,7 @@ func (s *Server) handleGetPageOCR(ctx context.Context, in *getPageOCRInput) (*ge
 type uploadDocumentInput struct {
 	RawBody huma.MultipartFormFiles[struct {
 		File  huma.FormFile `form:"file" contentType:"application/octet-stream" required:"true" doc:"Hochzuladende Datei (beliebiger Dateityp; Fileee lehnt nicht unterstützte Typen serverseitig mit 415 ab)."`
-		Title string        `form:"title" doc:"Optionaler Dokumenttitel. Fallback: Dateiname der hochgeladenen Datei."`
+		Title string        `form:"title" required:"false" doc:"Optionaler Dokumenttitel. Fallback: Dateiname der hochgeladenen Datei."`
 	}]
 }
 
