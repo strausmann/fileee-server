@@ -1,3 +1,9 @@
+## [0.2.1](https://github.com/strausmann/fileee-server/compare/v0.2.0...v0.2.1) (2026-08-03)
+
+### Bug Fixes
+
+* **deps:** update module github.com/danielgtaylor/huma/v2 to v2.39.0 ([#20](https://github.com/strausmann/fileee-server/issues/20)) ([d534bae](https://github.com/strausmann/fileee-server/commit/d534bae776566300d1b7b1fe4ec04d486f841b7c)), closes [#963](https://github.com/strausmann/fileee-server/issues/963)
+
 ## [0.2.0](https://github.com/strausmann/fileee-server/compare/v0.1.1...v0.2.0) (2026-07-25)
 
 ### Features
