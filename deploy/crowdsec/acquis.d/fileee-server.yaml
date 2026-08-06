@@ -1,7 +1,7 @@
 # Template — muss auf dem Ziel-Node nach /etc/crowdsec/acquis.d/ kopiert werden,
 # siehe README-Abschnitt "CrowdSec-Anbindung aktivieren". Im Repo allein ist es wirkungslos.
 #
-# follow_stderr MUSS false bleiben: stdout traegt den Access-Log im NGINX-combined-Format,
+# follow_stderr MUSS false bleiben: stdout trägt den Access-Log im NGINX-combined-Format,
 # stderr das JSON-App-/Audit-Log. Ohne diese Zeile (Default true) landet das JSON im
 # nginx-Parser und erzeugt nur Parse-Fehler.
 source: docker
