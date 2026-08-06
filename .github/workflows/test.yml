@@ -48,14 +48,14 @@ jobs:
           #   auth.go 100.0→90, config.go 100.0→90, secrets.go 100.0→90, server.go 100.0→90,
           #   handlers_destructive.go 100.0→90, accesslog.go 96.1→85, watch.go 97.4→85,
           #   handlers_conversations.go 94.6→80, handlers_share.go 89.2→75, resolve.go 88.9→75,
-          #   errors.go 80.0→70, handlers_entities.go 78.0→65,
           #   version.go 100.0→90, banner.go 100.0→90, selfcheck.go 100.0→90 (die drei neuen
           #   Boot-Diagnostics-Dateien, Issue #17/Enhancement-Bündel "Boot-Diagnostics +
           #   Versionsbanner + OCI-Labels")
-          #   handlers_documents.go 90.5→80: die vier zuvor untesteten Handler (handleListDocuments,
-          #   decodeCursor, handleDownloadDocumentPDF, handleDownloadPageImage) haben eigene Tests
-          #   bekommen, die Datei erreicht damit die Business-Logic-Zieltabelle und die
-          #   Übergangsschwelle 50 entfällt.
+          #   Nachgezogen, nachdem die zuvor untesteten Handler eigene Tests bekommen haben —
+          #   ausserhalb von main.go (main/fatal/execFileeeServer/runInfisicalCommand/
+          #   infisicalVersionCommand kapseln os.Exit, syscall.Exec und exec.Command und sind
+          #   deshalb bewusst ungetestet) gibt es damit keine 0%-Funktion mehr:
+          #   handlers_documents.go 90.5→80, handlers_entities.go 98.0→90, errors.go 100.0→90.
           ./scripts/coverage-gate-strict.sh cover.out \
             cmd/fileee-server/auth.go:90 \
             cmd/fileee-server/config.go:90 \
@@ -67,8 +67,8 @@ jobs:
             cmd/fileee-server/handlers_conversations.go:80 \
             cmd/fileee-server/handlers_share.go:75 \
             cmd/fileee-server/resolve.go:75 \
-            cmd/fileee-server/errors.go:70 \
-            cmd/fileee-server/handlers_entities.go:65 \
+            cmd/fileee-server/errors.go:90 \
+            cmd/fileee-server/handlers_entities.go:90 \
             cmd/fileee-server/handlers_documents.go:80 \
             cmd/fileee-server/version.go:90 \
             cmd/fileee-server/banner.go:90 \

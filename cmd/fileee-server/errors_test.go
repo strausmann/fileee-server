@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -170,5 +171,29 @@ func TestMapError_Unknown(t *testing.T) {
 	}
 	if code := wantBody(t, got).ErrorCode; code != "internal_error" {
 		t.Errorf("code = %q, want %q", code, "internal_error")
+	}
+}
+
+// TestStatusError_ErrorInterface prüft die beiden Interface-Methoden von statusError direkt.
+// Beide werden sonst nur indirekt über Huma aufgerufen (error bzw. huma.StatusError), sodass eine
+// Regression — etwa ein versehentlich zurückgegebener ErrorCode statt der Meldung — in den
+// mapError-Tests unbemerkt bliebe: die prüfen die Felder, nicht die Methoden.
+func TestStatusError_ErrorInterface(t *testing.T) {
+	err := newStatusError(http.StatusBadRequest, "invalid_cursor", "invalid cursor parameter")
+
+	if got := err.Error(); got != "invalid cursor parameter" {
+		t.Errorf("Error() = %q, want %q", got, "invalid cursor parameter")
+	}
+	if got := err.GetStatus(); got != http.StatusBadRequest {
+		t.Errorf("GetStatus() = %d, want 400", got)
+	}
+	// Der Status steht bewusst NICHT im JSON-Body (unexportiertes Feld, siehe statusError-Doku) —
+	// er ist bereits der HTTP-Status-Code. Nur error und code gehören in den Body.
+	body, mErr := json.Marshal(err)
+	if mErr != nil {
+		t.Fatalf("statusError serialisieren: %v", mErr)
+	}
+	if got, want := string(body), `{"error":"invalid cursor parameter","code":"invalid_cursor"}`; got != want {
+		t.Errorf("JSON = %s, want %s", got, want)
 	}
 }
