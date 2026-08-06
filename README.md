@@ -401,6 +401,73 @@ Zwei getrennte Log-Ströme:
   Destruktiv-Operation (Hard-DELETE) wird hier zusätzlich auf `warn`-Level protokolliert, bevor der
   Löschversuch überhaupt startet.
 
+### CrowdSec-Anbindung aktivieren
+
+> **Die Datei `deploy/crowdsec/acquis.d/fileee-server.yaml` im Repo ist ein Template, kein
+> aktiver Zustand.** Solange die beiden folgenden Schritte auf dem Ziel-Node nicht ausgeführt
+> sind, liest niemand den Access-Log — es gibt keine Acquisition, keinen Parser und keine
+> Alerts. Der bewusste 401-statt-403-Entwurf der Auth-Middleware bleibt dann wirkungslos.
+
+**Schritt 1 — Acquisition ausrollen.** Das Verzeichnis existiert auf einem frischen Node
+oft noch nicht:
+
+```bash
+sudo mkdir -p /etc/crowdsec/acquis.d
+sudo cp deploy/crowdsec/acquis.d/fileee-server.yaml /etc/crowdsec/acquis.d/
+```
+
+Läuft CrowdSec selbst im Container, gehört die Datei stattdessen in dessen `acquis.d`-Mount.
+Voraussetzungen: der CrowdSec-Agent braucht Zugriff auf den Docker-Socket
+(`/var/run/docker.sock`, Default von `docker_host`), der Container muss den Log-Driver
+`json-file` nutzen, und `container_name` in der Datei muss zum `container_name` der
+verwendeten `deploy/compose.*.yaml` passen (alle drei Templates setzen `fileee-server`).
+
+**Schritt 2 — Collection installieren.** Ohne `crowdsecurity/nginx` gibt es keinen Parser für
+das `combined`-Format:
+
+```bash
+sudo cscli collections install crowdsecurity/nginx
+sudo systemctl reload crowdsec
+```
+
+Im Container-Setup stattdessen `crowdsecurity/nginx` zu `CROWDSEC_COLLECTIONS` ergänzen und den
+Agent neu starten.
+
+**Schritt 3 — Verifikation (Pflicht).** Ohne diesen Nachweis ist unklar, ob die Anbindung
+wirklich greift:
+
+```bash
+cscli collections list | grep nginx     # muss crowdsecurity/nginx zeigen
+cscli metrics                           # Acquisition des Containers: lines_parsed > 0, nicht nur lines_read
+
+# Positivtest: 401-Burst gegen eine geschützte Route
+for i in $(seq 1 20); do
+  curl -s -o /dev/null -H "X-API-Key: falsch" https://fileee.example.com/v1/documents
+done
+cscli alerts list && cscli decisions list   # muss einen Ban zeigen
+```
+
+`lines_read > 0` bei `lines_parsed = 0` bedeutet: die Acquisition greift, aber der Parser
+fehlt oder bekommt die falschen Zeilen — dann Schritt 2 prüfen und ob wirklich nur **stdout**
+eingelesen wird (`follow_stderr: false`, siehe unten).
+
+**Warum `follow_stderr: false` nicht optional ist:** `follow_stderr` steht bei CrowdSec per
+Default auf `true`. Da fileee-server stdout und stderr für zwei verschiedene Formate nutzt
+(siehe oben), bekäme der `nginx`-Parser sonst das JSON-App-Log mit und erzeugt reine
+Parse-Fehler.
+
+**Fallback,** falls die `source: docker`-Acquisition nicht parst: den Access-Log zusätzlich in
+eine Datei schreiben und per `source: file` mit `filenames:` und `labels: {type: nginx}`
+einlesen.
+
+**Wenn später weitere Dienste dazukommen:** CrowdSec kann Container per Docker-Label selbst
+entdecken (`use_container_labels: true` in der Acquisition, dann `crowdsec.enable=true` und
+`crowdsec.labels.type=nginx` am jeweiligen Container). Das spart pro Dienst eine eigene
+`acquis.d`-Datei. Achtung dabei: Eine 401-basierte Bruteforce-Erkennung darf **nicht** auf
+Dienste ausgeweitet werden, die einen OAuth-Discovery-Flow bedienen — der beginnt zwingend mit
+einem 401 (`WWW-Authenticate: Bearer resource_metadata=…`) und würde false-positive Bans
+erzeugen. Für fileee-server mit reiner `X-API-Key`-/Bearer-Auth ist das unkritisch.
+
 ## Howto — Entwickler
 
 ### Lokal bauen und testen
@@ -494,7 +561,7 @@ Danach die neue `register*Routes`-Methode in `server.go` (`Handler()`) aufrufen.
 - **Credentials** (Fileee-Username/-Passwort/-TOTP-Seed, `FILEEE_API_TOKEN`, Infisical-Machine-Identity) gehören **ausschließlich** in einen Secret-Manager (Vaultwarden/Infisical) — niemals in Code, Fixtures oder Commits.
 - Die **Session-Datei** (`FILEEE_SESSION_PATH`) ist ein Secret (Dateirechte `0600`), wird nie geloggt oder committed.
 - Der Server läuft als **rootless, distroless** Container (`gcr.io/distroless/static-debian12:nonroot`, `uid 65532`, statisches Binary, `CGO_ENABLED=0`) — keine Shell, kein Paketmanager im Laufzeit-Image.
-- Zugriffs-Logs im NGINX-`combined`-Format auf stdout erlauben CrowdSec, den vorhandenen `crowdsecurity/nginx`-Parser (`http-probing`, `http-bruteforce`, `http-crawl-non-statics`) ohne Custom-Parser zu nutzen. Die Client-IP wird nur aus Reverse-Proxy-Headern übernommen, wenn die TCP-Quelle in `FILEEE_TRUSTED_PROXIES` liegt.
+- Zugriffs-Logs im NGINX-`combined`-Format auf stdout erlauben CrowdSec, den vorhandenen `crowdsecurity/nginx`-Parser (`http-probing`, `http-bruteforce`, `http-crawl-non-statics`) ohne Custom-Parser zu nutzen. Die Client-IP wird nur aus Reverse-Proxy-Headern übernommen, wenn die TCP-Quelle in `FILEEE_TRUSTED_PROXIES` liegt. **Die Anbindung ist nicht automatisch aktiv** — sie muss auf dem Ziel-Node eingerichtet und verifiziert werden, siehe [„CrowdSec-Anbindung aktivieren"](#crowdsec-anbindung-aktivieren).
 - Details zur schonenden Fileee-Nutzung (Rate-Limiting/Backoff, geteilt über alle Handler): [go-fileee ADR-0005](https://github.com/strausmann/go-fileee/blob/main/docs/adr/0005-schonender-betrieb-rate-limiting.md).
 
 ## Lokale Co-Entwicklung mit go-fileee

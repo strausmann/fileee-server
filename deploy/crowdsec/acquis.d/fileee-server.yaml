@@ -1,12 +1,13 @@
-# fileee-server Access-Log (NGINX-combined auf stdout) -> crowdsecurity/nginx
+# Template — muss auf dem Ziel-Node nach /etc/crowdsec/acquis.d/ kopiert werden,
+# siehe README-Abschnitt "CrowdSec-Anbindung aktivieren". Im Repo allein ist es wirkungslos.
+#
+# follow_stderr MUSS false bleiben: stdout trägt den Access-Log im NGINX-combined-Format,
+# stderr das JSON-App-/Audit-Log. Ohne diese Zeile (Default true) landet das JSON im
+# nginx-Parser und erzeugt nur Parse-Fehler.
 source: docker
 container_name:
-  - fileee-server            # tatsächlichen Container-Namen einsetzen
+  - fileee-server            # muss zum container_name der genutzten compose.*.yaml passen
+follow_stdout: true
+follow_stderr: false
 labels:
   type: nginx                # routet an crowdsecurity/nginx (http-bruteforce/http-probing)
-# Voraussetzungen: CrowdSec-Agent hat Docker-Socket-Zugriff; Log-Driver json-file;
-#   CROWDSEC_COLLECTIONS enthält crowdsecurity/nginx.
-# Deploy-Verifikation (PFLICHT): `cscli metrics` -> lines_parsed>0 (nicht nur read);
-#   Positiv: 20x curl mit falschem X-API-Key -> `cscli alerts/decisions list` zeigt Ban.
-# Fallback, falls docker-source hier nicht parst: Access-Log zusätzlich in Datei +
-#   source: file / filenames: [...] / labels: {type: nginx}.
