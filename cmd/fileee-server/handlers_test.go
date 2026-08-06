@@ -2783,3 +2783,300 @@ func TestDeleteDocument_AuditLogWritten(t *testing.T) {
 		}
 	}
 }
+
+// ---------------------------------------------------------------------------
+// GET /v1/documents (Liste/Suche) und die beiden Streaming-Downloads
+//
+// Diese Handler waren die im Coverage-Gate von .github/workflows/test.yml namentlich
+// genannten 0%-Stellen ("Schwelle bewusst niedrig, bis eigene Tests nachgezogen sind"):
+// handleListDocuments, decodeCursor, handleDownloadDocumentPDF, handleDownloadPageImage.
+// ---------------------------------------------------------------------------
+
+// listDocumentFixture ist die Mock-Fileee-Antwort für ein einzelnes Dokument in den
+// Listen-/Such-Tests — bewusst minimal (id/version/status), da die Handler den Inhalt nur
+// durchreichen und nicht interpretieren.
+const listDocumentFixture = `{"id":"doc-1","version":7,"status":"DONE"}`
+
+// TestListDocuments_WithQuery_SearchesAndHydrates deckt den Query-Zweig ab: Documents.Search
+// liefert nur Treffer-IDs ("POST /api/documents/rest/query"), der Handler hydriert jede davon per
+// Documents.Get zum vollen Dokument. Genau dieses N+1-Muster ist in handleListDocuments bewusst in
+// Kauf genommen — der Test hält es fest, damit ein späteres Umbauen auffällt.
+func TestListDocuments_WithQuery_SearchesAndHydrates(t *testing.T) {
+	routes := map[string]mockRoute{
+		"POST /api/documents/rest/query": {
+			Status: http.StatusOK,
+			Body:   []byte(`{"rows":["doc-1"],"totalRows":1}`),
+		},
+		"GET /api/documents/rest/doc-1": {
+			Status: http.StatusOK,
+			Body:   []byte(listDocumentFixture),
+		},
+	}
+	_, ts := newTestServer(t, routes)
+
+	req := newAuthedRequest(t, http.MethodGet, ts.URL+"/v1/documents?query=rechnung", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET /v1/documents?query=rechnung: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d, want 200, body=%s", resp.StatusCode, body)
+	}
+
+	var got documentListBody
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatalf("Response dekodieren: %v", err)
+	}
+	if len(got.Items) != 1 || got.Items[0].ID != "doc-1" {
+		t.Fatalf("Items = %+v, want genau doc-1", got.Items)
+	}
+	if got.TotalRows != 1 {
+		t.Errorf("TotalRows = %d, want 1", got.TotalRows)
+	}
+	// Der Such-Zweig liefert bewusst KEINEN Folge-Cursor — Paginierung läuft dort über
+	// SearchOptions.Start, nicht über den Diff-Cursor.
+	if got.Cursor != "" {
+		t.Errorf("Cursor = %q, want leer im Such-Zweig", got.Cursor)
+	}
+}
+
+// TestListDocuments_WithoutQuery_DiffReturnsCursor deckt den Sync-Zweig ab: ohne `query` läuft der
+// Handler über Documents.Diff und gibt einen codierten Folge-Cursor zurück. Der Test dekodiert das
+// Token wieder und prüft, dass es die aus der Diff-Antwort bekannte id/version trägt — damit ist
+// die Runde encodeCursor→decodeCursor als Ganzes abgedeckt, nicht nur "irgendein String".
+func TestListDocuments_WithoutQuery_DiffReturnsCursor(t *testing.T) {
+	routes := map[string]mockRoute{
+		"POST /api/documents/rest/diff": {
+			Status: http.StatusOK,
+			Body:   []byte(`{"rows":[` + listDocumentFixture + `],"idsToDelete":[],"totalRows":1}`),
+		},
+	}
+	_, ts := newTestServer(t, routes)
+
+	req := newAuthedRequest(t, http.MethodGet, ts.URL+"/v1/documents", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET /v1/documents: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d, want 200, body=%s", resp.StatusCode, body)
+	}
+
+	var got documentListBody
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatalf("Response dekodieren: %v", err)
+	}
+	if len(got.Items) != 1 || got.Items[0].ID != "doc-1" {
+		t.Fatalf("Items = %+v, want genau doc-1", got.Items)
+	}
+	if got.Cursor == "" {
+		t.Fatal("Cursor ist leer, erwartet ein Folge-Token")
+	}
+
+	roundTripped, err := decodeCursor(got.Cursor)
+	if err != nil {
+		t.Fatalf("zurueckgegebener Cursor ist nicht wieder dekodierbar: %v", err)
+	}
+	if v, ok := roundTripped.Known["doc-1"]; !ok || v != 7 {
+		t.Errorf("Cursor.Known = %+v, want doc-1 mit version 7", roundTripped.Known)
+	}
+}
+
+// TestListDocuments_InvalidCursorReturns400 prüft den Fehlerpfad von decodeCursor: ein Cursor, der
+// kein Base64-URL ist, muss 400 invalid_cursor liefern — NICHT 500. Der Wert kommt vom Client und
+// ist damit keine Server-Fehlfunktion.
+func TestListDocuments_InvalidCursorReturns400(t *testing.T) {
+	_, ts := newTestServer(t, nil)
+
+	req := newAuthedRequest(t, http.MethodGet, ts.URL+"/v1/documents?cursor=%21kein-base64", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET /v1/documents?cursor=...: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d, want 400, body=%s", resp.StatusCode, body)
+	}
+}
+
+// TestDecodeCursor_EmptyYieldsFreshDocumentCursor hält den Sonderfall fest, den der Handler beim
+// allerersten Aufruf ohne `cursor`-Parameter nutzt: ein leerer String ist KEIN Fehler, sondern ein
+// frischer Cursor mit documentCursorEntityType und leerem Known (Voll-Sync von vorn).
+func TestDecodeCursor_EmptyYieldsFreshDocumentCursor(t *testing.T) {
+	got, err := decodeCursor("")
+	if err != nil {
+		t.Fatalf("decodeCursor(\"\") = Fehler %v, erwartet frischer Cursor", err)
+	}
+	if got.EntityType != documentCursorEntityType {
+		t.Errorf("EntityType = %q, want %q", got.EntityType, documentCursorEntityType)
+	}
+	if len(got.Known) != 0 {
+		t.Errorf("Known = %+v, want leer", got.Known)
+	}
+}
+
+// TestListDocuments_BackendErrorIsMapped prüft, dass ein 4xx des Fileee-Upstreams durch mapError
+// auf denselben Status der fileee-server-Antwort durchschlägt, statt zu einem generischen 500 zu
+// werden.
+func TestListDocuments_BackendErrorIsMapped(t *testing.T) {
+	routes := map[string]mockRoute{
+		"POST /api/documents/rest/diff": {
+			Status: http.StatusNotFound,
+			Body:   []byte(`{"apiError":"NOT_FOUND","errorMessage":"nope"}`),
+		},
+	}
+	_, ts := newTestServer(t, routes)
+
+	req := newAuthedRequest(t, http.MethodGet, ts.URL+"/v1/documents", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET /v1/documents: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusNotFound {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d, want 404, body=%s", resp.StatusCode, body)
+	}
+}
+
+// TestDownloadDocumentPDF_StreamsBody prüft den Streaming-Download: der Body kommt unveraendert
+// durch und traegt Content-Type application/pdf (Design-Spec §13, io.Copy ohne RAM-Puffer).
+func TestDownloadDocumentPDF_StreamsBody(t *testing.T) {
+	routes := map[string]mockRoute{
+		"GET /api/v1/documents/doc-1/pdf": {
+			Status:      http.StatusOK,
+			Body:        []byte("%PDF-1.7 interner-download"),
+			ContentType: "application/pdf",
+		},
+	}
+	_, ts := newTestServer(t, routes)
+
+	req := newAuthedRequest(t, http.MethodGet, ts.URL+"/v1/documents/doc-1/pdf", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET /v1/documents/doc-1/pdf: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d, want 200, body=%s", resp.StatusCode, body)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("Body lesen: %v", err)
+	}
+	if string(body) != "%PDF-1.7 interner-download" {
+		t.Errorf("body = %q, want %q", body, "%PDF-1.7 interner-download")
+	}
+	if ct := resp.Header.Get("Content-Type"); ct != "application/pdf" {
+		t.Errorf("Content-Type = %q, want application/pdf", ct)
+	}
+}
+
+// TestDownloadDocumentPDF_BackendErrorIsMapped prüft, dass ein Upstream-404 VOR dem Streaming
+// erkannt wird und als 404 durchschlaegt — der Handler darf keinen leeren 200-Stream aufmachen.
+func TestDownloadDocumentPDF_BackendErrorIsMapped(t *testing.T) {
+	routes := map[string]mockRoute{
+		"GET /api/v1/documents/doc-1/pdf": {
+			Status: http.StatusNotFound,
+			Body:   []byte(`{"apiError":"NOT_FOUND","errorMessage":"weg"}`),
+		},
+	}
+	_, ts := newTestServer(t, routes)
+
+	req := newAuthedRequest(t, http.MethodGet, ts.URL+"/v1/documents/doc-1/pdf", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET /v1/documents/doc-1/pdf: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusNotFound {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d, want 404, body=%s", resp.StatusCode, body)
+	}
+}
+
+// TestDownloadPageImage_StreamsBody prüft den zweiten Streaming-Pfad (Seitenbild statt PDF) samt
+// Content-Type image/jpeg.
+func TestDownloadPageImage_StreamsBody(t *testing.T) {
+	routes := map[string]mockRoute{
+		"GET /api/v1/pages/page-1/image": {
+			Status:      http.StatusOK,
+			Body:        []byte("JPEG-interner-download"),
+			ContentType: "image/jpeg",
+		},
+	}
+	_, ts := newTestServer(t, routes)
+
+	req := newAuthedRequest(t, http.MethodGet, ts.URL+"/v1/pages/page-1/image?v=3", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET /v1/pages/page-1/image: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d, want 200, body=%s", resp.StatusCode, body)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("Body lesen: %v", err)
+	}
+	if string(body) != "JPEG-interner-download" {
+		t.Errorf("body = %q, want %q", body, "JPEG-interner-download")
+	}
+	if ct := resp.Header.Get("Content-Type"); ct != "image/jpeg" {
+		t.Errorf("Content-Type = %q, want image/jpeg", ct)
+	}
+}
+
+// TestDownloadPageImage_BackendErrorIsMapped ist das Fehler-Gegenstueck zum Seitenbild-Stream.
+func TestDownloadPageImage_BackendErrorIsMapped(t *testing.T) {
+	routes := map[string]mockRoute{
+		"GET /api/v1/pages/page-1/image": {
+			Status: http.StatusNotFound,
+			Body:   []byte(`{"apiError":"NOT_FOUND","errorMessage":"weg"}`),
+		},
+	}
+	_, ts := newTestServer(t, routes)
+
+	req := newAuthedRequest(t, http.MethodGet, ts.URL+"/v1/pages/page-1/image?v=3", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET /v1/pages/page-1/image: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusNotFound {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d, want 404, body=%s", resp.StatusCode, body)
+	}
+}
+
+// TestUploadDuplicateError_ErrorInterface prüft die beiden Interface-Methoden des 409-Fehlers
+// direkt: Error() liefert die menschenlesbare Meldung, GetStatus() immer 409 (huma.StatusError).
+func TestUploadDuplicateError_ErrorInterface(t *testing.T) {
+	err := newUploadDuplicateError("doc-existing")
+
+	if got := err.Error(); got != "document already exists" {
+		t.Errorf("Error() = %q, want %q", got, "document already exists")
+	}
+	if got := err.GetStatus(); got != http.StatusConflict {
+		t.Errorf("GetStatus() = %d, want 409", got)
+	}
+	if err.ID != "doc-existing" || !err.IsDuplicate {
+		t.Errorf("ID/IsDuplicate = %q/%t, want doc-existing/true", err.ID, err.IsDuplicate)
+	}
+}
