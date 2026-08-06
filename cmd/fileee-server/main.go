@@ -5,6 +5,8 @@ package main
 
 import (
 	"context"
+	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -39,8 +41,10 @@ const healthcheckTimeout = 5 * time.Second
 // dieser Stelle noch nicht) begleitet den Infisical-Dual-Mode-Boot mit sicheren
 // Diagnose-Logs (Secret-NAMEN, nie -Werte, siehe secrets.go MaybeInjectInfisical-Doku).
 func main() {
-	if len(os.Args) > 1 && os.Args[1] == "healthcheck" {
-		os.Exit(runHealthcheck(healthcheckAddr(os.Getenv)))
+	if code, handled := runSubcommand(os.Args[1:], os.Stdout, os.Stderr, func() int {
+		return runHealthcheck(healthcheckAddr(os.Getenv))
+	}); handled {
+		os.Exit(code)
 	}
 
 	earlyLog := slog.New(slog.NewJSONHandler(os.Stderr, nil))
@@ -130,6 +134,55 @@ func main() {
 	// Watch-Poller beendet; stopKeepAlive/stopWatch blockieren zusätzlich explizit, bis ihre jeweilige
 	// Goroutine tatsächlich beendet ist (siehe StartKeepAlive/StartWatch-Doku) — kein Goroutine-Leak
 	// bleibt nach main() zurück.
+}
+
+// runSubcommand behandelt die Subcommands der Binary und liefert (Exit-Code, true), sobald der
+// Aufruf damit abgeschlossen ist; (0, false) heisst "kein Argument angegeben, normaler
+// Server-Boot ist gemeint". args ist os.Args[1:], healthcheck die Injektion für den echten
+// Healthcheck (der einen Netzwerk-Zugriff macht und deshalb nicht in einem Test laufen soll).
+//
+// Ein unbekanntes Argument ist bewusst ein Fehler mit Exit-Code 2 statt stillschweigend
+// ignoriert zu werden: Vorher startete `fileee-server healthcheckk` (Tippfehler) einen zweiten
+// Serverprozess im Container, statt fehlzuschlagen — der HEALTHCHECK lief dann in den Timeout
+// statt sauber Exit 1 zu liefern. Aus demselben Grund lehnen beide Subcommands überzählige
+// Argumente ab (`version foo`), statt sie zu verschlucken.
+func runSubcommand(args []string, stdout, stderr io.Writer, healthcheck func() int) (int, bool) {
+	if len(args) == 0 {
+		return 0, false
+	}
+	switch args[0] {
+	case "healthcheck":
+		if hasExtraArgs(args, stderr) {
+			return 2, true
+		}
+		return healthcheck(), true
+	case "version":
+		if hasExtraArgs(args, stderr) {
+			return 2, true
+		}
+		fmt.Fprintf(stdout, "%s\n", resolveVersion())
+		return 0, true
+	default:
+		fmt.Fprintf(stderr, "fileee-server: unbekanntes Argument %q\n\n"+
+			"Verfuegbare Subcommands:\n"+
+			"  healthcheck   GET auf 127.0.0.1:<port>/healthz, Exit 0 bei 2xx (Container-HEALTHCHECK)\n"+
+			"  version       gibt die Version aus und beendet sich\n\n"+
+			"Ohne Argument startet der Server.\n", args[0])
+		return 2, true
+	}
+}
+
+// hasExtraArgs meldet überzählige Argumente hinter einem Subcommand nach stderr und liefert
+// true. Kein Subcommand nimmt Parameter — ohne diese Prüfung würde `fileee-server version foo`
+// das `foo` verschlucken und damit genau den Tippfehler verdecken, den runSubcommand aufdecken
+// soll.
+func hasExtraArgs(args []string, stderr io.Writer) bool {
+	if len(args) <= 1 {
+		return false
+	}
+	fmt.Fprintf(stderr, "fileee-server: %s nimmt keine weiteren Argumente (%q ist zu viel)\n",
+		args[0], args[1])
+	return true
 }
 
 // runHealthcheck führt EINEN HTTP-GET gegen http://addr/healthz aus und liefert den Exit-Code für

@@ -377,6 +377,31 @@ distroless-Image):
 Docker-`HEALTHCHECK` in `deploy/Dockerfile` nutzt genau diesen Aufruf mit `--interval=30s
 --timeout=5s --start-period=5s --retries=3`.
 
+### Subcommands
+
+Die Binary kennt zwei Subcommands; ohne Argument startet der Server.
+
+| Aufruf | Wirkung | Exit-Code |
+|---|---|---|
+| `fileee-server` | startet den Server | — |
+| `fileee-server healthcheck` | GET auf `127.0.0.1:<port>/healthz` | `0` bei 2xx, sonst `1` |
+| `fileee-server version` | gibt die Version aus und beendet sich | `0` |
+| alles andere | Fehlermeldung nach stderr | `2` |
+
+Kein Subcommand nimmt Parameter — `fileee-server version foo` ist ein Fehler mit Exit-Code `2`,
+kein stillschweigend ignoriertes `foo`.
+
+`version` ist im distroless-Image der einzige Weg, die Version ohne laufenden Server
+abzufragen — es gibt keine Shell:
+
+```bash
+docker run --rm ghcr.io/strausmann/fileee-server:latest version
+```
+
+Ein unbekanntes Argument ist **bewusst** ein Fehler statt still ignoriert zu werden: Sonst
+startet ein Tippfehler wie `healthcheckk` einen zweiten Serverprozess, statt fehlzuschlagen,
+und der Container-`HEALTHCHECK` läuft in den Timeout statt sauber Exit 1 zu liefern.
+
 ### Rate-Limit und Trusted-Proxies hinter einem Reverse Proxy
 
 - `FILEEE_RATE_RPS`/`FILEEE_RATE_BURST` begrenzen die Requests **gegen Fileee**, nicht die
