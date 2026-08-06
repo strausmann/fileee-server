@@ -2905,6 +2905,23 @@ func TestListDocuments_InvalidCursorReturns400(t *testing.T) {
 		body, _ := io.ReadAll(resp.Body)
 		t.Fatalf("status = %d, want 400, body=%s", resp.StatusCode, body)
 	}
+
+	// Der Status allein genuegt hier nicht: der maschinenlesbare "code" ist die Zusage an
+	// Aufrufer, die den Fehler programmatisch auswerten (statusError.ErrorCode, errors.go).
+	// Ein Wechsel auf einen anderen Code bei weiterhin 400 waere eine stille API-Aenderung.
+	var errBody struct {
+		Error string `json:"error"`
+		Code  string `json:"code"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&errBody); err != nil {
+		t.Fatalf("Fehler-Body dekodieren: %v", err)
+	}
+	if errBody.Code != "invalid_cursor" {
+		t.Errorf("code = %q, want invalid_cursor (body=%+v)", errBody.Code, errBody)
+	}
+	if errBody.Error != "invalid cursor parameter" {
+		t.Errorf("error = %q, want %q", errBody.Error, "invalid cursor parameter")
+	}
 }
 
 // TestDecodeCursor_EmptyYieldsFreshDocumentCursor hält den Sonderfall fest, den der Handler beim
