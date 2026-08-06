@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -97,6 +99,92 @@ func TestLogLevel(t *testing.T) {
 	for in, want := range cases {
 		if got := logLevel(in).String(); got != want {
 			t.Errorf("logLevel(%q) = %s, erwartet %s", in, got, want)
+		}
+	}
+}
+
+// TestRunSubcommand deckt alle vier Aufrufarten ab: kein Argument (Server-Boot), healthcheck
+// (durchgereichter Exit-Code), version (Ausgabe auf stdout) und ein unbekanntes Argument, das
+// mit Exit-Code 2 abbrechen MUSS statt still ignoriert zu werden.
+func TestRunSubcommand(t *testing.T) {
+	tests := []struct {
+		name        string
+		args        []string
+		healthcheck func() int
+		wantCode    int
+		wantHandled bool
+		wantStdout  string
+		wantErrPart string
+	}{
+		{
+			name:        "ohne Argument startet der Server",
+			args:        nil,
+			wantCode:    0,
+			wantHandled: false,
+		},
+		{
+			name:        "healthcheck reicht den Exit-Code durch",
+			args:        []string{"healthcheck"},
+			healthcheck: func() int { return 1 },
+			wantCode:    1,
+			wantHandled: true,
+		},
+		{
+			name:        "version schreibt die Version nach stdout",
+			args:        []string{"version"},
+			wantCode:    0,
+			wantHandled: true,
+			wantStdout:  resolveVersion() + "\n",
+		},
+		{
+			name:        "unbekanntes Argument bricht mit Exit-Code 2 ab",
+			args:        []string{"healthcheckk"},
+			wantCode:    2,
+			wantHandled: true,
+			wantErrPart: `unbekanntes Argument "healthcheckk"`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			hc := tt.healthcheck
+			if hc == nil {
+				hc = func() int {
+					t.Fatal("healthcheck darf hier nicht aufgerufen werden")
+					return 0
+				}
+			}
+
+			code, handled := runSubcommand(tt.args, &stdout, &stderr, hc)
+
+			if code != tt.wantCode || handled != tt.wantHandled {
+				t.Fatalf("runSubcommand(%v) = (%d, %t), erwartet (%d, %t)",
+					tt.args, code, handled, tt.wantCode, tt.wantHandled)
+			}
+			if got := stdout.String(); got != tt.wantStdout {
+				t.Errorf("stdout = %q, erwartet %q", got, tt.wantStdout)
+			}
+			if tt.wantErrPart == "" {
+				if stderr.Len() != 0 {
+					t.Errorf("stderr = %q, erwartet leer", stderr.String())
+				}
+			} else if !strings.Contains(stderr.String(), tt.wantErrPart) {
+				t.Errorf("stderr = %q, erwartet enthaelt %q", stderr.String(), tt.wantErrPart)
+			}
+		})
+	}
+}
+
+// TestRunSubcommand_UnbekanntesArgumentNenntSubcommands stellt sicher, dass die Fehlermeldung
+// die verfuegbaren Subcommands auflistet — sonst muss man im Fehlerfall in den Quelltext sehen.
+func TestRunSubcommand_UnbekanntesArgumentNenntSubcommands(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	runSubcommand([]string{"--help"}, &stdout, &stderr, func() int { return 0 })
+
+	for _, want := range []string{"healthcheck", "version"} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Errorf("Fehlermeldung nennt %q nicht: %q", want, stderr.String())
 		}
 	}
 }
