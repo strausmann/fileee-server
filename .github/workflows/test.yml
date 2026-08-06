@@ -77,3 +77,19 @@ jobs:
         run: |
           chmod +x scripts/doc-coverage.sh
           ./scripts/doc-coverage.sh
+  # deploy/Dockerfile wurde bis dahin nur im Release gebaut — eine Regression darin fiel erst
+  # im naechtlichen release.yml auf, nach dem Merge (siehe #24). Dieser Job baut dasselbe
+  # Dockerfile ohne Push, damit sie vor dem Merge auffaellt. Damit Renovates automerge darauf
+  # wartet, muss "docker-build" in den Required Status Checks der main-Branch-Protection stehen.
+  docker-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: deploy/Dockerfile
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
