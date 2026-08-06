@@ -144,15 +144,22 @@ func main() {
 // Ein unbekanntes Argument ist bewusst ein Fehler mit Exit-Code 2 statt stillschweigend
 // ignoriert zu werden: Vorher startete `fileee-server healthcheckk` (Tippfehler) einen zweiten
 // Serverprozess im Container, statt fehlzuschlagen — der HEALTHCHECK lief dann in den Timeout
-// statt sauber Exit 1 zu liefern.
+// statt sauber Exit 1 zu liefern. Aus demselben Grund lehnen beide Subcommands überzählige
+// Argumente ab (`version foo`), statt sie zu verschlucken.
 func runSubcommand(args []string, stdout, stderr io.Writer, healthcheck func() int) (int, bool) {
 	if len(args) == 0 {
 		return 0, false
 	}
 	switch args[0] {
 	case "healthcheck":
+		if hasExtraArgs(args, stderr) {
+			return 2, true
+		}
 		return healthcheck(), true
 	case "version":
+		if hasExtraArgs(args, stderr) {
+			return 2, true
+		}
 		fmt.Fprintf(stdout, "%s\n", resolveVersion())
 		return 0, true
 	default:
@@ -163,6 +170,19 @@ func runSubcommand(args []string, stdout, stderr io.Writer, healthcheck func() i
 			"Ohne Argument startet der Server.\n", args[0])
 		return 2, true
 	}
+}
+
+// hasExtraArgs meldet überzählige Argumente hinter einem Subcommand nach stderr und liefert
+// true. Kein Subcommand nimmt Parameter — ohne diese Prüfung würde `fileee-server version foo`
+// das `foo` verschlucken und damit genau den Tippfehler verdecken, den runSubcommand aufdecken
+// soll.
+func hasExtraArgs(args []string, stderr io.Writer) bool {
+	if len(args) <= 1 {
+		return false
+	}
+	fmt.Fprintf(stderr, "fileee-server: %s nimmt keine weiteren Argumente (%q ist zu viel)\n",
+		args[0], args[1])
+	return true
 }
 
 // runHealthcheck führt EINEN HTTP-GET gegen http://addr/healthz aus und liefert den Exit-Code für

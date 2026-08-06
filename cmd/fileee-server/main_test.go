@@ -143,6 +143,20 @@ func TestRunSubcommand(t *testing.T) {
 			wantHandled: true,
 			wantErrPart: `unbekanntes Argument "healthcheckk"`,
 		},
+		{
+			name:        "version mit ueberzaehligem Argument bricht ab",
+			args:        []string{"version", "foo"},
+			wantCode:    2,
+			wantHandled: true,
+			wantErrPart: `version nimmt keine weiteren Argumente ("foo" ist zu viel)`,
+		},
+		{
+			name:        "healthcheck mit ueberzaehligem Argument bricht ab, ohne ihn auszufuehren",
+			args:        []string{"healthcheck", "--x"},
+			wantCode:    2,
+			wantHandled: true,
+			wantErrPart: `healthcheck nimmt keine weiteren Argumente ("--x" ist zu viel)`,
+		},
 	}
 
 	for _, tt := range tests {

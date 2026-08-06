@@ -388,6 +388,9 @@ Die Binary kennt zwei Subcommands; ohne Argument startet der Server.
 | `fileee-server version` | gibt die Version aus und beendet sich | `0` |
 | alles andere | Fehlermeldung nach stderr | `2` |
 
+Kein Subcommand nimmt Parameter — `fileee-server version foo` ist ein Fehler mit Exit-Code `2`,
+kein stillschweigend ignoriertes `foo`.
+
 `version` ist im distroless-Image der einzige Weg, die Version ohne laufenden Server
 abzufragen — es gibt keine Shell:
 
