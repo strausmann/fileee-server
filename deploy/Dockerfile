@@ -25,20 +25,9 @@ ARG VERSION=dev
 ARG REVISION=unknown
 ARG CREATED=unknown
 
-# Infisical-CLI-Version.
-#
-# WICHTIG (Korrektur gegenüber Task-Brief/Design-Spec): Die dort genannte Version
-# "v0.43.113" existiert NICHT als GitHub-Release — weder als Tag "v0.43.113" noch
-# als "infisical-cli/v0.43.113" (verifiziert 2026-07-24 via GitHub-Releases-API
-# UND `git ls-remote --tags https://github.com/Infisical/infisical.git`, beide
-# ergebnislos). Der aktuell NEUESTE echte "infisical-cli/vX.Y.Z"-Tag ist v0.41.90.
-# Dessen linux_amd64-Release wurde lokal heruntergeladen, die SHA-256-Summe gegen
-# die von Infisical veröffentlichte `checksums.txt` geprüft (Treffer) und `file`/
-# `ldd` bestätigten "statically linked" / "not a dynamic executable" — siehe
-# task-16-report.md für die vollständige Verifikations-Session. Diese Stage
-# verifiziert die Checksumme UND die Statisch-Eigenschaft erneut beim Build.
+# Neuester echter "infisical-cli/vX.Y.Z"-Tag (das im Design-Brief genannte v0.43.113
+# existiert nicht). Checksumme absichtlich nicht gepinnt — siehe RUN-Block unten.
 ARG INFISICAL_CLI_VERSION=0.41.90
-ARG INFISICAL_CLI_SHA256=ff67e4b0f5fafe1b33ea1606767e6235a8742cc47e6af634cdff54b8d1fccc0a
 
 WORKDIR /src
 
@@ -56,17 +45,22 @@ COPY . .
 ENV CGO_ENABLED=0 GOOS=linux GOARCH=amd64
 RUN go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" -o /fileee-server ./cmd/fileee-server
 
-# Statische Infisical-CLI holen (offizielles Release-Binary, kein Drittanbieter-
-# Mirror), Checksumme UND Staticness verifizieren, bevor sie ins Runtime-Image
-# wandert. `ldd` auf einem echten statischen Binary meldet "not a dynamic
-# executable" und liefert Exit-Code 1 — deshalb `|| true` und Text-Grep statt
-# Exit-Code-Prüfung.
+# Statische Infisical-CLI holen, Checksumme und Staticness verifizieren. Die erwartete
+# Summe kommt aus der `checksums.txt` des Releases statt aus einem zweiten ARG — sonst
+# müsste sie bei jedem Renovate-Bump von Hand mitgezogen werden (Fixes #24).
+# `test -s` fängt ein geändertes Asset-Namensschema ab; ohne den Guard liefe die
+# Prüfung über eine leere Liste. `ldd` liefert bei statischen Binaries Exit-Code 1,
+# daher `|| true` + Text-Grep.
 RUN set -eux; \
-    curl -fsSL -o /tmp/infisical.tar.gz \
-      "https://github.com/Infisical/infisical/releases/download/infisical-cli/v${INFISICAL_CLI_VERSION}/infisical_${INFISICAL_CLI_VERSION}_linux_amd64.tar.gz"; \
-    echo "${INFISICAL_CLI_SHA256}  /tmp/infisical.tar.gz" | sha256sum -c -; \
+    base="https://github.com/Infisical/infisical/releases/download/infisical-cli/v${INFISICAL_CLI_VERSION}"; \
+    asset="infisical_${INFISICAL_CLI_VERSION}_linux_amd64.tar.gz"; \
+    curl -fsSL -o "/tmp/${asset}" "${base}/${asset}"; \
+    curl -fsSL -o /tmp/checksums.txt "${base}/checksums.txt"; \
+    awk -v f="${asset}" '$2 == f' /tmp/checksums.txt > /tmp/infisical.sha256; \
+    test -s /tmp/infisical.sha256; \
+    ( cd /tmp && sha256sum -c infisical.sha256 ); \
     mkdir -p /tmp/infisical-extract; \
-    tar -xzf /tmp/infisical.tar.gz -C /tmp/infisical-extract; \
+    tar -xzf "/tmp/${asset}" -C /tmp/infisical-extract; \
     mv /tmp/infisical-extract/infisical /infisical; \
     chmod 755 /infisical; \
     ( ldd /infisical 2>&1 || true ) | grep -q "not a dynamic executable" \
