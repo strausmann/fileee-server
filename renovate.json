@@ -41,6 +41,16 @@
       ],
       "minimumReleaseAge": "0",
       "description": "Interne Lib: sofort (kein Stabilitaets-Delay), damit fileee-server die frische go-fileee-Version in derselben Nacht zieht. Automerge kommt aus den Typ-Regeln (minor/patch=ja, major=manuell)."
+    },
+    {
+      "matchPackageNames": [
+        "conventional-changelog-conventionalcommits"
+      ],
+      "matchUpdateTypes": [
+        "major"
+      ],
+      "enabled": false,
+      "description": "v10 ersetzt die Handlebars-Templates des Presets durch Render-Funktionen. semantic-release 25 nutzt aber conventional-changelog-writer 8, der weiterhin Handlebars erwartet (@semantic-release/release-notes-generator 14 haengt auf ^8). Folge: die Release Notes enthalten NUR noch die Ueberschrift, Features/Bug Fixes fallen ersatzlos weg - ohne Fehlermeldung. Verifiziert per semantic-release --dry-run, siehe PR #34. Wieder aktivieren, sobald release-notes-generator auf einen Writer mit Render-Funktions-Unterstuetzung wechselt."
     }
   ],
   "customManagers": [
