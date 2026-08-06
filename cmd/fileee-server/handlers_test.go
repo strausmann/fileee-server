@@ -3097,3 +3097,130 @@ func TestUploadDuplicateError_ErrorInterface(t *testing.T) {
 		t.Errorf("ID/IsDuplicate = %q/%t, want doc-existing/true", err.ID, err.IsDuplicate)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// GET /v1/boxes und GET /v1/boxes/{id}
+//
+// Die letzten beiden 0%-Handler in handlers_entities.go — die uebrigen Box-Routen (Ein-/
+// Ausheften) hatten schon Tests, die Lese-Routen nicht.
+// ---------------------------------------------------------------------------
+
+// boxFixture ist die Mock-Fileee-Antwort fuer eine einzelne FileeeBox.
+const boxFixture = `{"id":"box-1","version":3,"name":"Steuer 2026"}`
+
+// TestListBoxes_Success prueft GET /v1/boxes. Boxes.List ist intern ein Diff mit vollem
+// FileeeBox-Cursor (fileee/boxes.go), laeuft also ueber "POST /api/fileeeboxes/rest/diff". Der
+// Test haelt zusaetzlich fest, dass TotalRows aus len(boxes) abgeleitet wird — BoxService.List
+// liefert keinen eigenen TotalRows-Wert, und die Diff-Antwort traegt hier bewusst einen davon
+// ABWEICHENDEN totalRows-Wert, damit ein versehentliches Durchreichen auffiele.
+func TestListBoxes_Success(t *testing.T) {
+	routes := map[string]mockRoute{
+		"POST /api/fileeeboxes/rest/diff": {
+			Status: http.StatusOK,
+			Body:   []byte(`{"rows":[` + boxFixture + `],"idsToDelete":[],"totalRows":99}`),
+		},
+	}
+	_, ts := newTestServer(t, routes)
+
+	req := newAuthedRequest(t, http.MethodGet, ts.URL+"/v1/boxes", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET /v1/boxes: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d, want 200, body=%s", resp.StatusCode, body)
+	}
+
+	var got entityListBody[fileee.FileeeBox]
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatalf("Response dekodieren: %v", err)
+	}
+	if len(got.Items) != 1 || got.Items[0].ID != "box-1" {
+		t.Fatalf("Items = %+v, want genau box-1", got.Items)
+	}
+	if got.TotalRows != 1 {
+		t.Errorf("TotalRows = %d, want 1 (aus len(boxes), NICHT die 99 der Diff-Antwort)", got.TotalRows)
+	}
+}
+
+// TestListBoxes_BackendErrorIsMapped prueft, dass ein Upstream-Fehler durch mapError auf denselben
+// Status durchschlaegt statt zu einem generischen 500 zu werden.
+func TestListBoxes_BackendErrorIsMapped(t *testing.T) {
+	routes := map[string]mockRoute{
+		"POST /api/fileeeboxes/rest/diff": {
+			Status: http.StatusNotFound,
+			Body:   []byte(`{"apiError":"NOT_FOUND","errorMessage":"nope"}`),
+		},
+	}
+	_, ts := newTestServer(t, routes)
+
+	req := newAuthedRequest(t, http.MethodGet, ts.URL+"/v1/boxes", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET /v1/boxes: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusNotFound {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d, want 404, body=%s", resp.StatusCode, body)
+	}
+}
+
+// TestGetBox_Success prueft den duennen Durchgriff GET /v1/boxes/{id} auf Boxes.Get
+// ("GET /api/fileeeboxes/rest/box-1").
+func TestGetBox_Success(t *testing.T) {
+	routes := map[string]mockRoute{
+		"GET /api/fileeeboxes/rest/box-1": {
+			Status: http.StatusOK,
+			Body:   []byte(boxFixture),
+		},
+	}
+	_, ts := newTestServer(t, routes)
+
+	req := newAuthedRequest(t, http.MethodGet, ts.URL+"/v1/boxes/box-1", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET /v1/boxes/box-1: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d, want 200, body=%s", resp.StatusCode, body)
+	}
+
+	var got fileee.FileeeBox
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatalf("Response dekodieren: %v", err)
+	}
+	if got.ID != "box-1" {
+		t.Errorf("ID = %q, want box-1", got.ID)
+	}
+}
+
+// TestGetBox_BackendErrorIsMapped ist das Fehler-Gegenstueck zu TestGetBox_Success.
+func TestGetBox_BackendErrorIsMapped(t *testing.T) {
+	routes := map[string]mockRoute{
+		"GET /api/fileeeboxes/rest/box-1": {
+			Status: http.StatusNotFound,
+			Body:   []byte(`{"apiError":"NOT_FOUND","errorMessage":"weg"}`),
+		},
+	}
+	_, ts := newTestServer(t, routes)
+
+	req := newAuthedRequest(t, http.MethodGet, ts.URL+"/v1/boxes/box-1", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET /v1/boxes/box-1: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusNotFound {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d, want 404, body=%s", resp.StatusCode, body)
+	}
+}
