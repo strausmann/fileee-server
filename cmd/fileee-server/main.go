@@ -153,7 +153,7 @@ func runSubcommand(args []string, stdout, stderr io.Writer, healthcheck func() i
 	case "healthcheck":
 		return healthcheck(), true
 	case "version":
-		fmt.Fprintln(stdout, resolveVersion())
+		fmt.Fprintf(stdout, "%s\n", resolveVersion())
 		return 0, true
 	default:
 		fmt.Fprintf(stderr, "fileee-server: unbekanntes Argument %q\n\n"+
