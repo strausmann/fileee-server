@@ -1,3 +1,13 @@
+## [0.3.0](https://github.com/strausmann/fileee-server/compare/v0.2.1...v0.3.0) (2026-08-07)
+
+### Features
+
+* **server:** version-subcommand und fail-fast bei unbekannten argumenten ([#31](https://github.com/strausmann/fileee-server/issues/31)) ([7d0a9cd](https://github.com/strausmann/fileee-server/commit/7d0a9cdfa113b9e15a63d8469682860b6584217e))
+
+### Bug Fixes
+
+* **deploy:** infisical-cli-checksumme zur build-zeit aus checksums.txt verifizieren ([#28](https://github.com/strausmann/fileee-server/issues/28)) ([07a3939](https://github.com/strausmann/fileee-server/commit/07a3939885d7c099b44287735cfb4f91a81efeb7)), closes [#24](https://github.com/strausmann/fileee-server/issues/24)
+
 ## [0.2.1](https://github.com/strausmann/fileee-server/compare/v0.2.0...v0.2.1) (2026-08-03)
 
 ### Bug Fixes
