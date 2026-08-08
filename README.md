@@ -9,7 +9,7 @@
 > **Baut auf [`github.com/strausmann/go-fileee`](https://github.com/strausmann/go-fileee).**
 > `fileee-server` ist der selbst gehostete REST-API-Service rund um die
 > [go-fileee](https://github.com/strausmann/go-fileee) Core-Lib — er konsumiert sie als normale,
-> versionierte Go-Modul-Abhängigkeit (`github.com/strausmann/go-fileee`, aktuell `v0.1.1`) und
+> versionierte Go-Modul-Abhängigkeit (`github.com/strausmann/go-fileee`, aktuell `v0.2.0`) und
 > enthält selbst **keinen** Fileee-Protokoll-Code. Dieses Repo entstand per Split aus `go-fileee`
 > (siehe [ADR-0008](docs/adr/0008-fileee-server.md)); die grundlegenden Architektur-Entscheidungen
 > zur Core-Lib (Library-first, Auth-Modell, Rate-Limiting, Domänen-Neutralität, Ausschluss
@@ -93,7 +93,7 @@ go build ./cmd/fileee-server
 ```
 
 Voraussetzung: **Go 1.25 oder neuer**. Die Abhängigkeit auf die Core-Lib
-(`github.com/strausmann/go-fileee v0.1.1`) wird über `go.mod` aufgelöst — kein lokaler Checkout
+(`github.com/strausmann/go-fileee v0.2.0`) wird über `go.mod` aufgelöst — kein lokaler Checkout
 von `go-fileee` nötig (Ausnahme: Co-Entwicklung an beiden Repos gleichzeitig, siehe
 [„Lokale Co-Entwicklung mit go-fileee"](#lokale-co-entwicklung-mit-go-fileee) unten).
 
@@ -599,7 +599,7 @@ go work init && go work use . ../go-fileee
 ```
 
 `go.work`/`go.work.sum` sind in `.gitignore` gelistet. Das committete `go.mod` bleibt immer auf
-einen echten, veröffentlichten `go-fileee`-Tag gepinnt (aktuell `v0.1.1`), **ohne** `replace`-
+einen echten, veröffentlichten `go-fileee`-Tag gepinnt (aktuell `v0.2.0`), **ohne** `replace`-
 Direktive.
 
 ## Dokumentation

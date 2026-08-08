@@ -60,7 +60,7 @@ func main() {
 	log := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: logLevel(cfg.LogLevel)}))
 	logStartupBanner(log, resolveVersion(), debug.ReadBuildInfo, infisicalVersionCommand)
 
-	fc, err := fileee.New(
+	fc, err := fileee.NewClient(
 		fileee.Credentials{
 			Username: cfg.FileeeUsername,
 			Password: cfg.FileeePassword,
