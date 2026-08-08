@@ -72,7 +72,7 @@ const watchMixedBatchPoll2 = `{"rows":[
 // zu variieren (z. B. "beim 2. Poll erscheint eine neue Nachricht"), ohne dass der Test auf reines
 // Timing angewiesen wäre. newTestFileeeClient selbst unterstützt das nicht (mockRoute ist eine
 // feste Fixture, keine Funktion) — deshalb hier ein eigenständiger, kleiner Aufbau mit denselben
-// Bausteinen (testJWTWithSub, fileee.New/WithBaseURL/WithSessionStore).
+// Bausteinen (testJWTWithSub, fileee.NewClient/WithBaseURL/WithSessionStore).
 func newWatchTestClient(t *testing.T, diffBody func(callN int) []byte) *fileee.Client {
 	t.Helper()
 
@@ -107,13 +107,13 @@ func newWatchTestClient(t *testing.T, diffBody func(callN int) []byte) *fileee.C
 	// Watcher-Poll-Takt (10ms in den Tests dieser Datei) künstlich auf den Lib-eigenen
 	// Default-Rate-Limiter gebremst, was den Test unnötig verlangsamt (kein Determinismus-Gewinn,
 	// nur Wartezeit) — analog zum Muster in fileee/conversations_write_test.go u.a.
-	fc, err := fileee.New(creds,
+	fc, err := fileee.NewClient(creds,
 		fileee.WithBaseURL(mockSrv.URL),
 		fileee.WithSessionStore(store),
 		fileee.WithRateLimit(1000, 1000),
 	)
 	if err != nil {
-		t.Fatalf("fileee.New: %v", err)
+		t.Fatalf("fileee.NewClient: %v", err)
 	}
 	return fc
 }

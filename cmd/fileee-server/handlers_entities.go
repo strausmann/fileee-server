@@ -57,12 +57,12 @@ type getBoxInput struct {
 
 // getBoxOutput ist der Response-Body von GET /v1/boxes/{id}.
 type getBoxOutput struct {
-	Body fileee.FileeeBox
+	Body fileee.Box
 }
 
 // listBoxesOutput ist der Response-Body von GET /v1/boxes.
 type listBoxesOutput struct {
-	Body entityListBody[fileee.FileeeBox]
+	Body entityListBody[fileee.Box]
 }
 
 // registerEntityRoutes registriert die Stammdaten-Operationen (Task 7 Read + Task 8 Write,
@@ -143,14 +143,14 @@ func (s *Server) registerEntityRoutes(api huma.API) {
 }
 
 // handleListBoxes implementiert GET /v1/boxes über Boxes.List (intern ein Diff mit vollem
-// FileeeBox-Cursor, fileee/boxes.go) — TotalRows wird hier aus len(boxes) abgeleitet, da
+// Box-Cursor, fileee/boxes.go) — TotalRows wird hier aus len(boxes) abgeleitet, da
 // BoxService.List keinen separaten TotalRows-Wert liefert.
 func (s *Server) handleListBoxes(ctx context.Context, in *emptyInput) (*listBoxesOutput, error) {
 	boxes, err := s.fc.Boxes.List(ctx)
 	if err != nil {
 		return nil, mapError(err)
 	}
-	return &listBoxesOutput{Body: entityListBody[fileee.FileeeBox]{Items: boxes, TotalRows: len(boxes)}}, nil
+	return &listBoxesOutput{Body: entityListBody[fileee.Box]{Items: boxes, TotalRows: len(boxes)}}, nil
 }
 
 // handleGetBox implementiert GET /v1/boxes/{id} — dünner Durchgriff auf Boxes.Get.

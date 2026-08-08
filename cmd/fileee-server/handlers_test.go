@@ -53,7 +53,7 @@ type mockRoute struct {
 // einen *fileee.Client (fc) als auch einen credential-losen *fileee.ShareClient (sc, Task 9) — die
 // Lib-eigenen `package fileee`-Test-Helfer (newMockServer/jsonHandler, mockserver_test.go) sind
 // unexportiert und aus `package main` heraus nicht erreichbar; dieser Helfer nutzt deshalb
-// ausschließlich exportierte Symbole (fileee.New, fileee.NewShareClient, fileee.WithBaseURL,
+// ausschließlich exportierte Symbole (fileee.NewClient, fileee.NewShareClient, fileee.WithBaseURL,
 // fileee.WithStaticBaseURL, fileee.WithSessionStore, fileee.NewFileSessionStore,
 // fileee.WithRateLimit). routes bildet zusätzliche "METHODE /pfad"-Kombinationen auf dem
 // Lib-Upstream (z.B. "GET /api/documents/rest/doc-1", oder ein Go-1.22+-Wildcard-Pattern wie
@@ -130,9 +130,9 @@ func newTestFileeeClient(t *testing.T, routes map[string]mockRoute) (*fileee.Cli
 
 	creds := fileee.Credentials{Username: "test@example.invalid", Password: "test-pw"}
 
-	fc, err := fileee.New(creds, fileee.WithBaseURL(mockSrv.URL), fileee.WithSessionStore(store))
+	fc, err := fileee.NewClient(creds, fileee.WithBaseURL(mockSrv.URL), fileee.WithSessionStore(store))
 	if err != nil {
-		t.Fatalf("fileee.New: %v", err)
+		t.Fatalf("fileee.NewClient: %v", err)
 	}
 
 	sc := fileee.NewShareClient(
@@ -515,12 +515,12 @@ func TestUploadDocument_Success(t *testing.T) {
 	if err := store.Save(context.Background(), seedSession); err != nil {
 		t.Fatalf("Session-Store vorbefüllen: %v", err)
 	}
-	fc, err := fileee.New(
+	fc, err := fileee.NewClient(
 		fileee.Credentials{Username: "test@example.invalid", Password: "test-pw"},
 		fileee.WithBaseURL(mockSrv.URL), fileee.WithSessionStore(store),
 	)
 	if err != nil {
-		t.Fatalf("fileee.New: %v", err)
+		t.Fatalf("fileee.NewClient: %v", err)
 	}
 	// sc wird von diesem Test nicht angesprochen (reiner Upload-Test) — trotzdem Pflichtfeld von
 	// NewServer, daher minimal gegen denselben Mock verdrahtet (kein /api/f/start-Handler nötig,
@@ -3105,11 +3105,11 @@ func TestUploadDuplicateError_ErrorInterface(t *testing.T) {
 // Ausheften) hatten schon Tests, die Lese-Routen nicht.
 // ---------------------------------------------------------------------------
 
-// boxFixture ist die Mock-Fileee-Antwort fuer eine einzelne FileeeBox.
+// boxFixture ist die Mock-Fileee-Antwort fuer eine einzelne Box.
 const boxFixture = `{"id":"box-1","version":3,"name":"Steuer 2026"}`
 
 // TestListBoxes_Success prueft GET /v1/boxes. Boxes.List ist intern ein Diff mit vollem
-// FileeeBox-Cursor (fileee/boxes.go), laeuft also ueber "POST /api/fileeeboxes/rest/diff". Der
+// Box-Cursor (fileee/boxes.go), laeuft also ueber "POST /api/fileeeboxes/rest/diff". Der
 // Test haelt zusaetzlich fest, dass TotalRows aus len(boxes) abgeleitet wird — BoxService.List
 // liefert keinen eigenen TotalRows-Wert, und die Diff-Antwort traegt hier bewusst einen davon
 // ABWEICHENDEN totalRows-Wert, damit ein versehentliches Durchreichen auffiele.
@@ -3134,7 +3134,7 @@ func TestListBoxes_Success(t *testing.T) {
 		t.Fatalf("status = %d, want 200, body=%s", resp.StatusCode, body)
 	}
 
-	var got entityListBody[fileee.FileeeBox]
+	var got entityListBody[fileee.Box]
 	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
 		t.Fatalf("Response dekodieren: %v", err)
 	}
@@ -3193,7 +3193,7 @@ func TestGetBox_Success(t *testing.T) {
 		t.Fatalf("status = %d, want 200, body=%s", resp.StatusCode, body)
 	}
 
-	var got fileee.FileeeBox
+	var got fileee.Box
 	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
 		t.Fatalf("Response dekodieren: %v", err)
 	}

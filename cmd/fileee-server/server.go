@@ -22,7 +22,7 @@ type Server struct {
 }
 
 // NewServer baut einen Server aus der geladenen Konfiguration (LoadConfig, Task 1), einem bereits
-// gegen Fileee eingerichteten Core-Lib-Client (fileee.New, siehe main.go), einem ebenfalls bereits
+// gegen Fileee eingerichteten Core-Lib-Client (fileee.NewClient, siehe main.go), einem ebenfalls bereits
 // eingerichteten, credential-losen ShareClient (fileee.NewShareClient, siehe main.go) und einem
 // strukturierten Logger. sc wird bewusst — analog zu fc — von AUSSEN injiziert statt intern in
 // NewServer gebaut: das hält NewServer frei von I/O (kein Login, kein Datei-/Netzwerkzugriff) und
