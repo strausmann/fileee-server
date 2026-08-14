@@ -20,12 +20,6 @@ import (
 // Voraussetzung, nur eine sinnvolle Übereinstimmung.
 const defaultDocumentListLimit = 100
 
-// documentCursorEntityType ist der EntityType-Diskriminator, den ein leerer `cursor`-Parameter für
-// GET /v1/documents initialisiert (fileee.NewCursor-Konvention, siehe fileee/query.go). Der Wert
-// ist reine Client-Bookkeeping-Metadatik der Lib (fließt in keine Diff-Logik ein) und wird beim
-// Roundtrip über encodeCursor/decodeCursor unverändert mitgeführt.
-const documentCursorEntityType = "Document"
-
 // uploadSizeLimit begrenzt den Request-Body von POST /v1/documents auf maxBytes
 // (FILEEE_MAX_UPLOAD_SIZE, Config.MaxUploadBytes) — siehe Verdrahtung + Begründung in
 // server.go Handler(). maxBytes <= 0 deaktiviert das Limit (kein sinnvoller Konfigurationswert,
@@ -114,34 +108,36 @@ func (s *Server) registerDocumentRoutes(api huma.API) {
 	}, s.handleExportZip)
 }
 
-// listDocumentsInput steuert GET /v1/documents. Ist Query gesetzt, läuft der Such-Zweig
-// (Documents.Search + Get-Hydration je Treffer — Search liefert laut fileee/search.go nur
-// Dokument-IDs, Design-Spec §17 "API/Code"); ist Query leer, läuft der Diff-Zweig (zustandsloser
-// Cursor-Sync über Documents.Diff). Beide Zweige teilen sich Limit.
+// listDocumentsInput drives GET /v1/documents. When Query is set, the search branch runs
+// (Documents.Search + a Get-hydration per hit — Search only returns document IDs per
+// fileee/search.go, Design-Spec §17 "API/Code"); when Query is empty, the page branch runs
+// (stateless Start/Limit pagination over Documents.Query, see documentPageCursor). Both branches
+// share Limit.
 type listDocumentsInput struct {
-	Query  string `query:"query" doc:"Volltextsuche (FULLTEXT/FUZZY über Documents.Search). Gesetzt aktiviert den Suchmodus statt des Diff-Modus."`
-	Limit  int    `query:"limit" doc:"Max. Anzahl Ergebnisse dieser Seite/dieses Suchlaufs. Wirkt nur im Suchmodus (query gesetzt); im Diff-Modus (leeres query) wird es ignoriert." default:"100"`
-	Cursor string `query:"cursor" doc:"Opaques Cursor-Token aus einer vorigen Antwort dieses Endpunkts (nur im Diff-Modus relevant, d.h. wenn query leer ist). Leer = kompletter Sync von vorn."`
+	Query  string `query:"query" doc:"Full-text search (FULLTEXT/FUZZY via Documents.Search). Setting it activates search mode instead of page mode."`
+	Limit  int    `query:"limit" doc:"Max. number of results for this page/search run." default:"100"`
+	Cursor string `query:"cursor" doc:"Opaque cursor token from a previous response of this endpoint (only relevant in page mode, i.e. when query is empty). Empty = start a full sync from scratch; an empty cursor in the response likewise means the last page was reached."`
 }
 
-// documentListBody ist der gemeinsame Response-Body von GET /v1/documents für beide Modi
-// (Design-Spec §17: einheitlicher Output {items, cursor, totalRows}). Cursor bleibt im Suchmodus
-// leer — Documents.Search kennt keinen Diff-Cursor, nur eine Start/Limit-Pagination.
+// documentListBody is the response body GET /v1/documents shares across both modes (Design-Spec
+// §17: unified output {items, cursor, totalRows}). Cursor stays empty in search mode —
+// Documents.Search has no page cursor, only Start/Limit pagination.
 //
-// Items ist bewusst []documentResponseBody, NICHT []fileee.Document (Security-Review-Fund,
-// PR #38: fileee.Document.MarshalJSON rekonstruiert bei JEDEM direkten Marshal — auch als
-// Slice-Element — den vollen Wire-Envelope {"attributes":{"data":{...}}} inkl. RawExtra,
-// UNABHÄNGIG von jedem `json:"-"`-Tag. Ein []fileee.Document hier hätte den gesamten Issue-#37-
-// Gate (includeAttributes + FILEEE_EXPOSE_ATTRIBUTES) für GET /v1/documents komplett umgangen —
-// jedes Dokument jeder Liste/jedes Suchergebnisses hätte ungegated die volle Finanz-PII geliefert.
-// documentResponseBody wird deshalb hier GENAU WIE bei get/upload/update-document verwendet, aber
-// MIT Attributes==nil (Listen bekommen KEIN opt-in-attributes — nur GET /v1/documents/{id} hat den
-// Gate-Pfad, siehe handleGetDocument). Siehe auch: TestDocumentResponseBody_JSONTagsStayInSyncWithFileeeDocument
-// (Drift-Guard) und response_body_safety_test.go (struktureller Guardrail gegen diese Fehlerklasse).
+// Items is deliberately []documentResponseBody, NOT []fileee.Document (security-review finding,
+// PR #38: fileee.Document.MarshalJSON unconditionally reconstructs the full wire envelope
+// {"attributes":{"data":{...}}} including RawExtra on EVERY direct marshal — even as a slice
+// element — REGARDLESS of any `json:"-"` tag. A []fileee.Document here would have completely
+// bypassed the Issue-#37 gate (includeAttributes + FILEEE_EXPOSE_ATTRIBUTES) for GET
+// /v1/documents — every document in every list/search result would have leaked the full
+// financial PII ungated. documentListBody therefore uses documentResponseBody exactly like
+// get/upload/update-document does, but WITH Attributes==nil (lists get NO opt-in attributes —
+// only GET /v1/documents/{id} has the gated path, see handleGetDocument). See also:
+// TestDocumentResponseBody_JSONTagsStayInSyncWithFileeeDocument (drift guard) and
+// response_body_safety_test.go (structural guardrail against this class of bug).
 type documentListBody struct {
-	Items     []documentResponseBody `json:"items" doc:"Dokumente dieser Seite bzw. dieses Suchlaufs. Enthält NIE ein \"attributes\"-Feld (kein Opt-in für Listen, siehe Attributes-Gate im README)."`
-	Cursor    string                 `json:"cursor" doc:"Opaques Folge-Cursor-Token für den nächsten Diff-Aufruf (leer im Suchmodus)."`
-	TotalRows int                    `json:"totalRows" doc:"Von Fileee gemeldete Gesamtzahl (Suchtreffer bzw. Diff-Zeilen)."`
+	Items     []documentResponseBody `json:"items" doc:"Documents on this page or in this search run. NEVER carries an \"attributes\" field (no opt-in for lists, see the Attributes gate in the README)."`
+	Cursor    string                 `json:"cursor" doc:"Opaque follow-up cursor token for the next call in page mode. Always empty in search mode; in page mode ONLY empty once the last page has been reached (see documentPageCursor)."`
+	TotalRows int                    `json:"totalRows" doc:"Total count reported by Fileee (search hits, or total documents in page mode)."`
 }
 
 // listDocumentsOutput kapselt documentListBody als Huma-Response von GET /v1/documents.
@@ -160,12 +156,13 @@ func mapDocuments(docs []fileee.Document) []documentResponseBody {
 	return out
 }
 
-// handleListDocuments implementiert GET /v1/documents. Ist Query gesetzt, sucht sie per
-// Documents.Search (liefert nur Treffer-IDs) und hydriert jeden Treffer per Documents.Get zum
-// vollen Dokument (N+1-Zugriffsmuster — bewusst in Kauf genommen, siehe Search-Dokumentation:
-// Details kommen bei dieser Fileee-API-Facette ausschließlich über Get). Ohne Query synchronisiert
-// sie inkrementell über Documents.Diff mit einem aus dem `cursor`-Parameter dekodierten
-// fileee.Cursor und liefert den codierten Folge-Cursor zurück.
+// handleListDocuments implements GET /v1/documents. When Query is set, it searches via
+// Documents.Search (returns only hit IDs) and hydrates every hit via Documents.Get to the full
+// document (N+1 access pattern — accepted deliberately, see the Search documentation: this
+// Fileee API facet only ever returns details via Get). Without Query, it pages through
+// Documents.Query using a Start offset decoded from the `cursor` parameter (documentPageCursor)
+// and returns the encoded follow-up cursor — see documentPageCursor for why this does NOT (any
+// longer) run over Documents.Diff (issue #39).
 func (s *Server) handleListDocuments(ctx context.Context, in *listDocumentsInput) (*listDocumentsOutput, error) {
 	limit := in.Limit
 	if limit <= 0 {
@@ -188,48 +185,114 @@ func (s *Server) handleListDocuments(ctx context.Context, in *listDocumentsInput
 		return &listDocumentsOutput{Body: documentListBody{Items: mapDocuments(items), TotalRows: res.TotalRows}}, nil
 	}
 
-	cursor, err := decodeCursor(in.Cursor)
+	start, err := decodeDocumentPageCursor(in.Cursor)
 	if err != nil {
 		return nil, newStatusError(http.StatusBadRequest, "invalid_cursor", "invalid cursor parameter")
 	}
-	diff, err := s.fc.Documents.Diff(ctx, cursor)
+	res, err := s.fc.Documents.Query(ctx, fileee.QueryOptions{Start: start, Limit: limit})
 	if err != nil {
 		return nil, mapError(err)
 	}
-	nextCursor, err := encodeCursor(diff.NextCursor)
-	if err != nil {
-		return nil, mapError(err)
+
+	nextStart := start + len(res.Rows)
+	var nextCursor string
+	if len(res.Rows) > 0 && nextStart < res.TotalRows {
+		nextCursor, err = encodeDocumentPageCursor(nextStart)
+		if err != nil {
+			return nil, mapError(err)
+		}
 	}
-	return &listDocumentsOutput{Body: documentListBody{Items: mapDocuments(diff.Rows), Cursor: nextCursor, TotalRows: diff.TotalRows}}, nil
+	return &listDocumentsOutput{Body: documentListBody{Items: mapDocuments(res.Rows), Cursor: nextCursor, TotalRows: res.TotalRows}}, nil
 }
 
-// encodeCursor verpackt einen Lib-Cursor (fileee.Cursor) als opakes Web-Token: JSON-Serialisierung,
-// anschließend Base64-URL ohne Padding. Aufrufer MÜSSEN das Ergebnis als Blackbox behandeln (siehe
-// documentListBody.Cursor) — der Server ist der einzige Ort, der es je wieder decodeCursor
-// übergibt.
-func encodeCursor(c fileee.Cursor) (string, error) {
-	b, err := json.Marshal(c)
+// documentPageCursor is the opaque pagination state of GET /v1/documents' page branch: a plain
+// zero-based offset into Documents.Query — NOT (any longer) a fileee.Cursor over
+// Documents.Diff.
+//
+// Root cause (issue #39, live-reproduced against fileee-api.strausmann.cloud): two consecutive
+// calls, where the second one passes back the cursor the first response returned, yielded the
+// same first/last document ID instead of the next page. The cause is go-fileee@v0.2.0 itself
+// (fileee/service.go, restService[T].Diff): it builds the request body (diffRequestWire) WITHOUT
+// ever populating the Start field — every Diff call therefore effectively always sends
+// `"start":0`, regardless of how many documents the cursor passed in already lists as known
+// (Known). fileee.Cursor itself has no offset/position field at all, only EntityType+Known
+// (fileee/query.go) — there is no way, via the public Documents.Diff signature, to force an
+// advancing start. Observed live behaviour: localResults does not visibly filter the returned
+// `rows` (the same top-N page comes back every time) — it presumably only ever informs
+// idsToDelete server-side, not page selection; see also the open verification gap in
+// .claude/skills/fileee/references/troubleshooting.md ("localResults delta effect ... not
+// confirmed").
+//
+// Documents.Query, on the other hand, is proven to paginate correctly via Start/Limit — both per
+// the API reference and by the fact that go-fileee's own full-export helper
+// (restService[T].queryAllPages) relies exclusively on Query for exactly this purpose, never on
+// Diff. This page branch does the same: Start advances on every call by the number of rows just
+// returned, until either an empty page comes back or the new Start reaches the reported
+// TotalRows — at which point the response cursor stays empty as the termination signal.
+//
+// No more Diff-based delta sync (idsToDelete goes away) — harmless for the full
+// document-by-document walk (migration scenario) issue #39 asks for; an incremental change sync
+// would need a fix in go-fileee itself first anyway, see the discussion above.
+type documentPageCursor struct {
+	Start int `json:"start"`
+}
+
+// encodeDocumentPageCursor packs a Start offset as an opaque web token — JSON serialization,
+// then base64 URL without padding, analogous to the generic encodeCursor(fileee.Cursor) (still
+// used by /v1/conversations, see handlers_conversations.go). Callers MUST treat the result as a
+// black box (see documentListBody.Cursor) — the server is the only place that ever passes it
+// back into decodeDocumentPageCursor.
+func encodeDocumentPageCursor(start int) (string, error) {
+	b, err := json.Marshal(documentPageCursor{Start: start})
 	if err != nil {
-		return "", fmt.Errorf("cursor kodieren: %w", err)
+		return "", fmt.Errorf("encode cursor: %w", err)
 	}
 	return base64.RawURLEncoding.EncodeToString(b), nil
 }
 
-// decodeCursor entpackt ein von encodeCursor erzeugtes Cursor-Token. Ein leerer String liefert
-// einen frischen Cursor (documentCursorEntityType, leeres Known) für einen vollständigen Sync von
-// vorn — das ist der Normalfall beim allerersten Aufruf ohne `cursor`-Parameter.
-func decodeCursor(s string) (fileee.Cursor, error) {
+// decodeDocumentPageCursor unpacks a token produced by encodeDocumentPageCursor into its Start
+// offset. An empty string yields Start=0 — the normal case for the very first call without a
+// `cursor` parameter (a full sync from scratch). A negative Start is treated as a decode error
+// (can only arise from a tampered/foreign token, see TestListDocuments_InvalidCursorReturns400)
+// — Documents.Query itself would quietly answer a too-LARGE start with an empty page, that is
+// not an error case.
+func decodeDocumentPageCursor(s string) (int, error) {
 	if s == "" {
-		return fileee.NewCursor(documentCursorEntityType), nil
+		return 0, nil
 	}
-	return decodeCursorToken(s)
+	raw, err := base64.RawURLEncoding.DecodeString(s)
+	if err != nil {
+		return 0, fmt.Errorf("decode cursor: %w", err)
+	}
+	var c documentPageCursor
+	if err := json.Unmarshal(raw, &c); err != nil {
+		return 0, fmt.Errorf("decode cursor: %w", err)
+	}
+	if c.Start < 0 {
+		return 0, fmt.Errorf("decode cursor: negative start %d", c.Start)
+	}
+	return c.Start, nil
 }
 
-// decodeCursorToken dekodiert einen NICHT-leeren, von encodeCursor erzeugten Cursor-Token
-// (Base64-URL ohne Padding, anschließend JSON) — der ressourcen-unabhängige Kern von decodeCursor.
-// Ausgelagert (Task 11), damit decodeConversationsCursor (handlers_conversations.go) dieselbe
-// Dekodierung mit einem anderen Default-EntityType ("Conversation" statt "Document") wiederverwenden
-// kann, ohne die Base64/JSON-Logik zu duplizieren.
+// encodeCursor packs a lib cursor (fileee.Cursor) as an opaque web token: JSON serialization,
+// then base64 URL without padding. Callers MUST treat the result as a black box — the server is
+// the only place that ever passes it back into decodeCursorToken. Still used by GET
+// /v1/conversations (handlers_conversations.go); GET /v1/documents has used documentPageCursor
+// instead of fileee.Cursor since issue #39 (see its doc comment).
+func encodeCursor(c fileee.Cursor) (string, error) {
+	b, err := json.Marshal(c)
+	if err != nil {
+		return "", fmt.Errorf("encode cursor: %w", err)
+	}
+	return base64.RawURLEncoding.EncodeToString(b), nil
+}
+
+// decodeCursorToken decodes a NON-empty cursor token produced by encodeCursor (base64 URL
+// without padding, then JSON) — deliberately its own function (rather than part of a
+// decodeCursor wrapper, which no longer exists for GET /v1/documents since issue #39) so that
+// decodeConversationsCursor (handlers_conversations.go) can reuse the same decoding with its own
+// default EntityType ("Conversation" instead of "Document") without duplicating the base64/JSON
+// logic.
 func decodeCursorToken(s string) (fileee.Cursor, error) {
 	raw, err := base64.RawURLEncoding.DecodeString(s)
 	if err != nil {
