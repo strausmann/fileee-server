@@ -30,6 +30,15 @@ type Config struct {
 	// (FILEEE_ALLOW_DESTRUCTIVE, Default false).
 	AllowDestructive bool
 
+	// ExposeAttributes schaltet die Ausgabe von Fileees automatisch extrahierten
+	// Indexierungs-Metadaten (attributes.data — Dokumenttyp, Absender/Empfänger, Tags,
+	// Rechnungsdaten, IBAN, Kundennummer, …) über GET /v1/documents/{id}?includeAttributes=true
+	// frei (FILEEE_EXPOSE_ATTRIBUTES, Default false). Analog zu AllowDestructive bewusst ein
+	// eigenes, explizites Opt-in-Gate — `attributes.data` ist private Finanz-PII (Issue #37),
+	// Default-Verhalten bleibt ohne dieses Flag unverändert (kein `attributes`-Feld im Response-
+	// Body, unabhängig vom `includeAttributes`-Query-Parameter).
+	ExposeAttributes bool
+
 	// ListenAddr ist die Adresse, auf der der HTTP-Server lauscht (FILEEE_LISTEN_ADDR,
 	// Default ":8080").
 	ListenAddr string
@@ -132,6 +141,7 @@ func LoadConfig(getenv func(string) string) (Config, error) {
 		FileeeTOTPSeed:    getenv("FILEEE_TOTP_SEED"),
 		APIToken:          getenv("FILEEE_API_TOKEN"),
 		AllowDestructive:  getBool(getenv, "FILEEE_ALLOW_DESTRUCTIVE", false),
+		ExposeAttributes:  getBool(getenv, "FILEEE_EXPOSE_ATTRIBUTES", false),
 		ListenAddr:        getString(getenv, "FILEEE_LISTEN_ADDR", ":8080"),
 		SessionPath:       getString(getenv, "FILEEE_SESSION_PATH", "/home/nonroot/session.json"),
 		KeepAliveInterval: getDuration(getenv, "FILEEE_KEEPALIVE_INTERVAL", 15*time.Minute),

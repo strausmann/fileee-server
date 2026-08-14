@@ -220,24 +220,46 @@ func decodeCursorToken(s string) (fileee.Cursor, error) {
 	return c, nil
 }
 
-// getDocumentInput steuert GET /v1/documents/{id}.
+// getDocumentInput steuert GET /v1/documents/{id}. IncludeAttributes ist das Issue-#37-Opt-in für
+// Fileees automatisch extrahierte Indexierungs-Metadaten (attributes.data, siehe attributes.go) —
+// weggelassen/false ändert am Response-Body NICHTS gegenüber dem Vorzustand.
 type getDocumentInput struct {
-	ID string `path:"id" doc:"Dokument-ID."`
+	ID                string `path:"id" doc:"Dokument-ID."`
+	IncludeAttributes bool   `query:"includeAttributes" doc:"Opt-in: Fileees automatisch extrahierte Indexierungs-Metadaten (Dokumenttyp, Absender/Empfänger, Tags, Rechnungsdaten, IBAN, Kundennummer, ...) im Response-Body unter \"attributes\" mitliefern. Braucht zusätzlich das serverseitige FILEEE_EXPOSE_ATTRIBUTES-Gate — ohne dieses Gate liefert ein gesetztes includeAttributes=true 403 statt der Metadaten (private Finanz-PII, niemals Default-on, siehe README)." default:"false"`
 }
 
-// getDocumentOutput ist der Response-Body von GET /v1/documents/{id}: das vollständige
-// fileee.Document (inkl. Attributes/Pages).
+// getDocumentOutput ist der Response-Body von GET/POST/PUT /v1/documents/{id}: das vollständige
+// fileee.Document (inkl. Pages) plus dem optionalen, Issue-#37-gegateten "attributes"-Feld — siehe
+// documentResponseBody (attributes.go).
 type getDocumentOutput struct {
-	Body fileee.Document
+	Body documentResponseBody
 }
 
-// handleGetDocument implementiert GET /v1/documents/{id} — dünner Durchgriff auf Documents.Get.
+// handleGetDocument implementiert GET /v1/documents/{id} — ein dünner Durchgriff auf
+// Documents.Get, ergänzt um das Issue-#37-Opt-in für attributes.data. Das Opt-in braucht ZWEI
+// unabhängige Zustimmungen: den Aufrufer-seitigen Query-Parameter (in.IncludeAttributes) UND das
+// Betreiber-seitige FILEEE_EXPOSE_ATTRIBUTES-Gate (s.cfg.ExposeAttributes) — fehlt eine der
+// beiden, bleibt das Verhalten unverändert (kein "attributes"-Feld), fehlt NUR das Gate bei
+// gesetztem Parameter, antwortet der Handler explizit mit 403 statt den Parameter still zu
+// ignorieren (der Aufrufer soll erkennen, dass er PII angefordert hat, die der Betreiber nicht
+// freigeschaltet hat — kein leises Weglassen).
 func (s *Server) handleGetDocument(ctx context.Context, in *getDocumentInput) (*getDocumentOutput, error) {
+	if in.IncludeAttributes && !s.cfg.ExposeAttributes {
+		return nil, newStatusError(http.StatusForbidden, "attributes_disabled",
+			"attribute exposure disabled; set FILEEE_EXPOSE_ATTRIBUTES=true to enable")
+	}
+
 	doc, err := s.fc.Documents.Get(ctx, in.ID)
 	if err != nil {
 		return nil, mapError(err)
 	}
-	return &getDocumentOutput{Body: *doc}, nil
+
+	body := newDocumentResponseBody(*doc)
+	if in.IncludeAttributes && s.cfg.ExposeAttributes {
+		attrs := mapDocumentAttributes(doc.Attributes)
+		body.Attributes = &attrs
+	}
+	return &getDocumentOutput{Body: body}, nil
 }
 
 // downloadDocumentPDFInput steuert GET /v1/documents/{id}/pdf.
@@ -397,7 +419,7 @@ func (s *Server) handleUploadDocument(ctx context.Context, in *uploadDocumentInp
 		}
 		return nil, mapError(err)
 	}
-	return &getDocumentOutput{Body: *res.Document}, nil
+	return &getDocumentOutput{Body: newDocumentResponseBody(*res.Document)}, nil
 }
 
 // updateDocumentInput steuert PUT /v1/documents/{id}. Die Pfad-id ist maßgeblich — sie überschreibt
@@ -417,7 +439,7 @@ func (s *Server) handleUpdateDocument(ctx context.Context, in *updateDocumentInp
 	if err != nil {
 		return nil, mapError(err)
 	}
-	return &getDocumentOutput{Body: *updated}, nil
+	return &getDocumentOutput{Body: newDocumentResponseBody(*updated)}, nil
 }
 
 // exportZipRequest ist der Body von POST /v1/documents/export-zip (Design-Spec §4.2). Eine leere
