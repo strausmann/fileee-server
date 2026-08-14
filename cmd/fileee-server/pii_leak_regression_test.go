@@ -160,6 +160,58 @@ func TestListCompanies_NeverLeaksAttributes(t *testing.T) {
 	}
 }
 
+// TestGetCompany_NeverLeaksAttributes is the single-lookup counterpart to
+// TestListCompanies_NeverLeaksAttributes: GET /v1/companies/{id} must project onto
+// companyResponseBody exactly like the list endpoint (same fileee.Company.MarshalJSON risk, see
+// registeredResponseBodyTypes doc comment in response_body_safety_test.go) — proven here with the
+// same fullAttributesCompanyJSON fixture, checked against the WHOLE response body (not just
+// Items[].attributes, since a single-lookup response has no "items" wrapper).
+func TestGetCompany_NeverLeaksAttributes(t *testing.T) {
+	routes := map[string]mockRoute{
+		"GET /api/companies/rest/company-1": {
+			Status: http.StatusOK,
+			Body:   []byte(fullAttributesCompanyJSON),
+		},
+	}
+	_, ts := newTestServer(t, routes)
+
+	req := newAuthedRequest(t, http.MethodGet, ts.URL+"/v1/companies/company-1", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET /v1/companies/company-1: %v", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("Body lesen: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", resp.StatusCode, body)
+	}
+
+	var generic map[string]json.RawMessage
+	if err := json.Unmarshal(body, &generic); err != nil {
+		t.Fatalf("Re-Unmarshal in generische Map-Form: %v", err)
+	}
+	if _, ok := generic["attributes"]; ok {
+		t.Fatalf(`LEAK: response enthält "attributes": %s`, body)
+	}
+	for _, pii := range []string{"DE02120300000000202051", "DE123456789", "billing@acme.example", "+49 40 1234567"} {
+		if strings.Contains(string(body), pii) {
+			t.Fatalf("LEAK: company PII %q present in GET /v1/companies/{id} response: %s", pii, body)
+		}
+	}
+
+	var decoded companyResponseBody
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		t.Fatalf("Body als companyResponseBody dekodieren: %v", err)
+	}
+	if decoded.ID != "company-1" || decoded.CompanyName != "ACME GmbH" {
+		t.Fatalf("decoded = %+v, want ID=company-1 CompanyName=\"ACME GmbH\"", decoded)
+	}
+}
+
 // assertNoAttributesKeyInItems decodes body as a generic {"items":[...]} shape and fails if ANY
 // item object carries an "attributes" key — used by the list regression tests above (documents AND
 // companies share this exact failure mode).

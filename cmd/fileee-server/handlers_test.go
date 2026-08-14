@@ -1105,6 +1105,168 @@ func TestUpdateContact_BackendError(t *testing.T) {
 	}
 }
 
+// TestGetContact_Success prüft den Happy-Path von GET /v1/contacts/{id}.
+func TestGetContact_Success(t *testing.T) {
+	routes := map[string]mockRoute{
+		"GET /api/contacts/rest/con-1": {
+			Status: http.StatusOK,
+			Body:   []byte(`{"id":"con-1","firstName":"Max","lastName":"Mustermann","companyId":"company-1","version":1}`),
+		},
+	}
+	_, ts := newTestServer(t, routes)
+
+	req := newAuthedRequest(t, http.MethodGet, ts.URL+"/v1/contacts/con-1", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET /v1/contacts/con-1: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d, want 200, body=%s", resp.StatusCode, body)
+	}
+
+	var out fileee.Contact
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatalf("Body als fileee.Contact dekodieren: %v", err)
+	}
+	if out.ID != "con-1" || out.CompanyID != "company-1" {
+		t.Fatalf("out = %+v, want ID=con-1 CompanyID=company-1", out)
+	}
+}
+
+// TestGetContact_UnknownIDReturns404 prüft den Fehlerpfad von GET /v1/contacts/{id} für eine
+// unbekannte ID — mapError übersetzt fileee.ErrNotFound (Upstream 404) in HTTP 404 (errors.go).
+func TestGetContact_UnknownIDReturns404(t *testing.T) {
+	routes := map[string]mockRoute{
+		"GET /api/contacts/rest/con-missing": {
+			Status: http.StatusNotFound,
+			Body:   []byte(`{"apiError":"NOT_FOUND","errorMessage":"unknown contact"}`),
+		},
+	}
+	_, ts := newTestServer(t, routes)
+
+	req := newAuthedRequest(t, http.MethodGet, ts.URL+"/v1/contacts/con-missing", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET /v1/contacts/con-missing: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusNotFound {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d, want 404, body=%s", resp.StatusCode, body)
+	}
+}
+
+// TestGetContact_InvalidIDReturns400 prüft den Fehlerpfad von GET /v1/contacts/{id} für eine vom
+// Upstream als ungültig zurückgewiesene ID — mapError reicht den Upstream-Statuscode über
+// *fileee.APIError unverändert durch (errors.go Pass-Through-Zweig), analog
+// TestCreateContact_BackendError.
+func TestGetContact_InvalidIDReturns400(t *testing.T) {
+	routes := map[string]mockRoute{
+		"GET /api/contacts/rest/not-an-object-id": {
+			Status: http.StatusBadRequest,
+			Body:   []byte(`{"apiError":"IllegalArgument","errorMessage":"invalid contact id"}`),
+		},
+	}
+	_, ts := newTestServer(t, routes)
+
+	req := newAuthedRequest(t, http.MethodGet, ts.URL+"/v1/contacts/not-an-object-id", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET /v1/contacts/not-an-object-id: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d, want 400, body=%s", resp.StatusCode, body)
+	}
+}
+
+// TestGetCompany_Success prüft den Happy-Path von GET /v1/companies/{id} — der Response-Body ist
+// companyResponseBody (nicht fileee.Company, siehe companyResponseBody-Doku in
+// handlers_entities.go), deshalb Decode gegen companyResponseBody statt fileee.Company.
+func TestGetCompany_Success(t *testing.T) {
+	routes := map[string]mockRoute{
+		"GET /api/companies/rest/company-1": {
+			Status: http.StatusOK,
+			Body:   []byte(`{"id":"company-1","version":1,"companyName":"ACME GmbH","contactType":"COMPANY","contactStatus":"MANAGED"}`),
+		},
+	}
+	_, ts := newTestServer(t, routes)
+
+	req := newAuthedRequest(t, http.MethodGet, ts.URL+"/v1/companies/company-1", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET /v1/companies/company-1: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d, want 200, body=%s", resp.StatusCode, body)
+	}
+
+	var out companyResponseBody
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatalf("Body als companyResponseBody dekodieren: %v", err)
+	}
+	if out.ID != "company-1" || out.CompanyName != "ACME GmbH" {
+		t.Fatalf("out = %+v, want ID=company-1 CompanyName=\"ACME GmbH\"", out)
+	}
+}
+
+// TestGetCompany_UnknownIDReturns404 prüft den Fehlerpfad von GET /v1/companies/{id} für eine
+// unbekannte ID.
+func TestGetCompany_UnknownIDReturns404(t *testing.T) {
+	routes := map[string]mockRoute{
+		"GET /api/companies/rest/company-missing": {
+			Status: http.StatusNotFound,
+			Body:   []byte(`{"apiError":"NOT_FOUND","errorMessage":"unknown company"}`),
+		},
+	}
+	_, ts := newTestServer(t, routes)
+
+	req := newAuthedRequest(t, http.MethodGet, ts.URL+"/v1/companies/company-missing", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET /v1/companies/company-missing: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusNotFound {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d, want 404, body=%s", resp.StatusCode, body)
+	}
+}
+
+// TestGetCompany_InvalidIDReturns400 prüft den Fehlerpfad von GET /v1/companies/{id} für eine vom
+// Upstream als ungültig zurückgewiesene ID.
+func TestGetCompany_InvalidIDReturns400(t *testing.T) {
+	routes := map[string]mockRoute{
+		"GET /api/companies/rest/not-an-object-id": {
+			Status: http.StatusBadRequest,
+			Body:   []byte(`{"apiError":"IllegalArgument","errorMessage":"invalid company id"}`),
+		},
+	}
+	_, ts := newTestServer(t, routes)
+
+	req := newAuthedRequest(t, http.MethodGet, ts.URL+"/v1/companies/not-an-object-id", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET /v1/companies/not-an-object-id: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d, want 400, body=%s", resp.StatusCode, body)
+	}
+}
+
 // TestExportZip_Success prüft den Happy-Path von POST /v1/documents/export-zip: der Handler
 // antwortet mit dem gestarteten Process-Objekt.
 func TestExportZip_Success(t *testing.T) {
