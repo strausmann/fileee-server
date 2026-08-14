@@ -1,3 +1,9 @@
+## [0.4.1](https://github.com/strausmann/fileee-server/compare/v0.4.0...v0.4.1) (2026-08-14)
+
+### Bug Fixes
+
+* **handlers:** page GET /v1/documents via Documents.Query instead of Documents.Diff ([#40](https://github.com/strausmann/fileee-server/issues/40)) ([5398fce](https://github.com/strausmann/fileee-server/commit/5398fce60d3a2bacd498d58ea371464c95afad83)), closes [#39](https://github.com/strausmann/fileee-server/issues/39)
+
 ## [0.4.0](https://github.com/strausmann/fileee-server/compare/v0.3.0...v0.4.0) (2026-08-14)
 
 ### Features
