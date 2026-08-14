@@ -1,3 +1,9 @@
+## [0.4.0](https://github.com/strausmann/fileee-server/compare/v0.3.0...v0.4.0) (2026-08-14)
+
+### Features
+
+* **handlers:** opt-in, gated exposure of document extraction attributes ([#38](https://github.com/strausmann/fileee-server/issues/38)) ([a04f713](https://github.com/strausmann/fileee-server/commit/a04f71375e0a913e1e50661e03081194e3a28d0b)), closes [#37](https://github.com/strausmann/fileee-server/issues/37) [Issue-#37-unrelated](https://github.com/strausmann/Issue-/issues/37-unrelated) [#37](https://github.com/strausmann/fileee-server/issues/37)
+
 ## [0.3.0](https://github.com/strausmann/fileee-server/compare/v0.2.1...v0.3.0) (2026-08-07)
 
 ### Features
