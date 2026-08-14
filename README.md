@@ -175,7 +175,7 @@ Feld wird an anderer Stelle direkt aus `os.Getenv` bezogen (einzige Ausnahme: de
 
 Alle Routen liegen unter `/v1/...` (Ausnahme `/healthz`). Vollständige, maschinenlesbare
 Beschreibung: OpenAPI 3.1 unter `/openapi.json`/`/openapi.yaml`, interaktive Docs unter `/docs`.
-Insgesamt **44 Huma-Operationen + 1 Plain-Mux-Route** (`/healthz`) = **45 HTTP-Routen**
+Insgesamt **46 Huma-Operationen + 1 Plain-Mux-Route** (`/healthz`) = **47 HTTP-Routen**
 (die 3 Destruktiv-Routen sind nur bedingt registriert, siehe unten).
 
 ### Dokumente/Seiten (8)
@@ -191,13 +191,15 @@ Insgesamt **44 Huma-Operationen + 1 Plain-Mux-Route** (`/healthz`) = **45 HTTP-R
 | GET | `/v1/pages/{pageId}/ocr` | OCR-Tokens (Text + Bounding-Box) einer eigenen Seite | Nein |
 | POST | `/v1/documents/export-zip` | Passwortgeschützter ZIP-Export (asynchron, über Prozess) | Ja (async) |
 
-### Stammdaten, Boxen, Reminders, Contacts (14)
+### Stammdaten, Boxen, Reminders, Contacts (16)
 
 | Methode | Pfad | Beschreibung | Mutation? |
 |---|---|---|---|
 | GET | `/v1/tags` | Tags auflisten | Nein |
 | GET | `/v1/companies` | Firmen auflisten | Nein |
+| GET | `/v1/companies/{id}` | Einzelne Firma abrufen | Nein |
 | GET | `/v1/contacts` | Kontakte auflisten | Nein |
+| GET | `/v1/contacts/{id}` | Einzelnen Kontakt abrufen | Nein |
 | GET | `/v1/document-types` | Dokumenttypen auflisten | Nein |
 | GET | `/v1/document-type-schemes` | Dokumenttyp-Schemas auflisten | Nein |
 | GET | `/v1/reminders` | Erinnerungen auflisten | Nein |

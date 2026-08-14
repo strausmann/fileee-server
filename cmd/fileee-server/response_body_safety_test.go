@@ -56,6 +56,7 @@ var registeredResponseBodyTypes = []reflect.Type{
 	reflect.TypeOf(fileee.Process{}),                            // POST /v1/documents/export-zip, GET /v1/processes/{id}, POST /v1/processes/{id}/wait
 	reflect.TypeOf(entityListBody[fileee.Tag]{}),                // GET /v1/tags
 	reflect.TypeOf(companyListBody{}),                           // GET /v1/companies
+	reflect.TypeOf(companyResponseBody{}),                       // GET /v1/companies/{id}
 	reflect.TypeOf(entityListBody[fileee.Contact]{}),            // GET /v1/contacts
 	reflect.TypeOf(entityListBody[fileee.DocumentType]{}),       // GET /v1/document-types
 	reflect.TypeOf(entityListBody[fileee.DocumentTypeScheme]{}), // GET /v1/document-type-schemes
@@ -63,7 +64,7 @@ var registeredResponseBodyTypes = []reflect.Type{
 	reflect.TypeOf(entityListBody[fileee.Box]{}),                // GET /v1/boxes
 	reflect.TypeOf(fileee.Box{}),                                // GET /v1/boxes/{id}
 	reflect.TypeOf(fileee.Reminder{}),                           // POST /v1/reminders, PUT /v1/reminders/{id}
-	reflect.TypeOf(fileee.Contact{}),                            // POST /v1/contacts, PUT /v1/contacts/{id}
+	reflect.TypeOf(fileee.Contact{}),                            // GET /v1/contacts/{id}, POST /v1/contacts, PUT /v1/contacts/{id}
 	reflect.TypeOf(fileee.Share{}),                              // POST /v1/share
 	reflect.TypeOf(fileee.SharedObject{}),                       // POST /v1/share-objects/{token}
 	reflect.TypeOf(conversationListBody{}),                      // GET /v1/conversations

@@ -59,6 +59,25 @@ func registerEntityListRoute[T any](api huma.API, operationID, path string, quer
 	})
 }
 
+// getContactInput steuert GET /v1/contacts/{id}.
+type getContactInput struct {
+	ID string `path:"id" doc:"Kontakt-ID."`
+}
+
+// handleGetContact implementiert GET /v1/contacts/{id} — dünner Durchgriff auf Contacts.Get
+// (restService[Contact].Get, fileee/service.go: GET /api/contacts/rest/:id). fileee.Contact hat
+// KEINE eigene MarshalJSON (anders als fileee.Document/fileee.Company — siehe
+// response_body_safety_test.go, TestNoFileeeMarshalerType_KnownSafeTypesPassCleanly), der
+// Response-Body kann deshalb wie bei POST/PUT /v1/contacts direkt fileee.Contact sein (contactOutput
+// wird hier wiederverwendet statt eines dritten, identischen Typs).
+func (s *Server) handleGetContact(ctx context.Context, in *getContactInput) (*contactOutput, error) {
+	c, err := s.fc.Contacts.Get(ctx, in.ID)
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return &contactOutput{Body: *c}, nil
+}
+
 // companyResponseBody mirrors fileee.Company's PUBLIC fields (same JSON tags, no embedding) —
 // exactly the same pattern and rationale as documentResponseBody/newDocumentResponseBody
 // (attributes.go). fileee.Company carries its own MarshalJSON (fileee/types.go) that — like
@@ -137,6 +156,30 @@ func (s *Server) handleListCompanies(ctx context.Context, in *emptyInput) (*list
 	return &listCompaniesOutput{Body: companyListBody{Items: items, TotalRows: res.TotalRows}}, nil
 }
 
+// getCompanyInput steuert GET /v1/companies/{id}.
+type getCompanyInput struct {
+	ID string `path:"id" doc:"Firmen-ID."`
+}
+
+// getCompanyOutput ist der Response-Body von GET /v1/companies/{id} — companyResponseBody wie bei
+// GET /v1/companies (companyListBody.Items), siehe companyResponseBody-Doku oben: fileee.Company
+// hat eine eigene MarshalJSON, die attributes.data ungegated mitliefert, deshalb NIE
+// fileee.Company direkt zurückgeben.
+type getCompanyOutput struct {
+	Body companyResponseBody
+}
+
+// handleGetCompany implementiert GET /v1/companies/{id} — dünner Durchgriff auf Companies.Get
+// (restService[Company].Get, fileee/service.go: GET /api/companies/rest/:id), projiziert auf
+// companyResponseBody (siehe getCompanyOutput-Doku).
+func (s *Server) handleGetCompany(ctx context.Context, in *getCompanyInput) (*getCompanyOutput, error) {
+	c, err := s.fc.Companies.Get(ctx, in.ID)
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return &getCompanyOutput{Body: newCompanyResponseBody(*c)}, nil
+}
+
 // getBoxInput steuert GET /v1/boxes/{id}.
 type getBoxInput struct {
 	ID string `path:"id" doc:"FileeeBox-ID."`
@@ -166,7 +209,19 @@ func (s *Server) registerEntityRoutes(api huma.API) {
 		Method:      http.MethodGet,
 		Path:        "/v1/companies",
 	}, s.handleListCompanies)
+	huma.Register(api, huma.Operation{
+		OperationID: "get-company",
+		Method:      http.MethodGet,
+		Path:        "/v1/companies/{id}",
+		Summary:     "Einzelne Firma laden",
+	}, s.handleGetCompany)
 	registerEntityListRoute(api, "list-contacts", "/v1/contacts", s.fc.Contacts.Query)
+	huma.Register(api, huma.Operation{
+		OperationID: "get-contact",
+		Method:      http.MethodGet,
+		Path:        "/v1/contacts/{id}",
+		Summary:     "Einzelnen Kontakt laden",
+	}, s.handleGetContact)
 	registerEntityListRoute(api, "list-document-types", "/v1/document-types", s.fc.DocumentTypes.Query)
 	registerEntityListRoute(api, "list-document-type-schemes", "/v1/document-type-schemes", s.fc.DocumentTypeSchemes.Query)
 	registerEntityListRoute(api, "list-reminders", "/v1/reminders", s.fc.Reminders.Query)
