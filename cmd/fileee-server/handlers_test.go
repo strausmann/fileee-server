@@ -2843,15 +2843,18 @@ func TestListDocuments_WithQuery_SearchesAndHydrates(t *testing.T) {
 	}
 }
 
-// TestListDocuments_WithoutQuery_DiffReturnsCursor deckt den Sync-Zweig ab: ohne `query` läuft der
-// Handler über Documents.Diff und gibt einen codierten Folge-Cursor zurück. Der Test dekodiert das
-// Token wieder und prüft, dass es die aus der Diff-Antwort bekannte id/version trägt — damit ist
-// die Runde encodeCursor→decodeCursor als Ganzes abgedeckt, nicht nur "irgendein String".
-func TestListDocuments_WithoutQuery_DiffReturnsCursor(t *testing.T) {
+// TestListDocuments_WithoutQuery_PageReturnsCursor covers the page branch: without `query`, the
+// handler runs over Documents.Query and returns an encoded follow-up cursor as long as further
+// documents remain. The test decodes the token again and checks it carries the expected Start
+// offset — covering the encodeDocumentPageCursor→decodeDocumentPageCursor round trip as a whole,
+// not just "some string". Multi-page advancement itself is covered by
+// TestListDocuments_WithoutQuery_CursorAdvancesAcrossPages (handlers_documents_pagination_test.go,
+// issue #39).
+func TestListDocuments_WithoutQuery_PageReturnsCursor(t *testing.T) {
 	routes := map[string]mockRoute{
-		"POST /api/documents/rest/diff": {
+		"POST /api/documents/rest/query": {
 			Status: http.StatusOK,
-			Body:   []byte(`{"rows":[` + listDocumentFixture + `],"idsToDelete":[],"totalRows":1}`),
+			Body:   []byte(`{"rows":[` + listDocumentFixture + `],"totalRows":2}`),
 		},
 	}
 	_, ts := newTestServer(t, routes)
@@ -2870,27 +2873,29 @@ func TestListDocuments_WithoutQuery_DiffReturnsCursor(t *testing.T) {
 
 	var got documentListBody
 	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
-		t.Fatalf("Response dekodieren: %v", err)
+		t.Fatalf("decode response: %v", err)
 	}
 	if len(got.Items) != 1 || got.Items[0].ID != "doc-1" {
-		t.Fatalf("Items = %+v, want genau doc-1", got.Items)
+		t.Fatalf("Items = %+v, want exactly doc-1", got.Items)
 	}
+	// totalRows=2, but only 1 row in this fixture response -> one document is still outstanding,
+	// so the response cursor must NOT be empty (a termination signal would be wrong here).
 	if got.Cursor == "" {
-		t.Fatal("Cursor ist leer, erwartet ein Folge-Token")
+		t.Fatal("Cursor is empty, expected a follow-up token (totalRows=2, but only 1 row delivered)")
 	}
 
-	roundTripped, err := decodeCursor(got.Cursor)
+	roundTripped, err := decodeDocumentPageCursor(got.Cursor)
 	if err != nil {
-		t.Fatalf("zurueckgegebener Cursor ist nicht wieder dekodierbar: %v", err)
+		t.Fatalf("returned cursor is not decodable again: %v", err)
 	}
-	if v, ok := roundTripped.Known["doc-1"]; !ok || v != 7 {
-		t.Errorf("Cursor.Known = %+v, want doc-1 mit version 7", roundTripped.Known)
+	if roundTripped != 1 {
+		t.Errorf("decodeDocumentPageCursor(Cursor) = %d, want 1 (start + 1 delivered row)", roundTripped)
 	}
 }
 
-// TestListDocuments_InvalidCursorReturns400 prüft den Fehlerpfad von decodeCursor: ein Cursor, der
-// kein Base64-URL ist, muss 400 invalid_cursor liefern — NICHT 500. Der Wert kommt vom Client und
-// ist damit keine Server-Fehlfunktion.
+// TestListDocuments_InvalidCursorReturns400 covers the error path of decodeDocumentPageCursor: a
+// cursor that is not base64 URL must yield 400 invalid_cursor — NOT 500. The value comes from the
+// client and is therefore not a server malfunction.
 func TestListDocuments_InvalidCursorReturns400(t *testing.T) {
 	_, ts := newTestServer(t, nil)
 
@@ -2924,19 +2929,29 @@ func TestListDocuments_InvalidCursorReturns400(t *testing.T) {
 	}
 }
 
-// TestDecodeCursor_EmptyYieldsFreshDocumentCursor hält den Sonderfall fest, den der Handler beim
-// allerersten Aufruf ohne `cursor`-Parameter nutzt: ein leerer String ist KEIN Fehler, sondern ein
-// frischer Cursor mit documentCursorEntityType und leerem Known (Voll-Sync von vorn).
-func TestDecodeCursor_EmptyYieldsFreshDocumentCursor(t *testing.T) {
-	got, err := decodeCursor("")
+// TestDecodeDocumentPageCursor_EmptyYieldsStartZero records the special case the handler relies
+// on for the very first call without a `cursor` parameter: an empty string is NOT an error, it
+// yields Start=0 (a full sync from scratch).
+func TestDecodeDocumentPageCursor_EmptyYieldsStartZero(t *testing.T) {
+	got, err := decodeDocumentPageCursor("")
 	if err != nil {
-		t.Fatalf("decodeCursor(\"\") = Fehler %v, erwartet frischer Cursor", err)
+		t.Fatalf("decodeDocumentPageCursor(\"\") = error %v, want start=0", err)
 	}
-	if got.EntityType != documentCursorEntityType {
-		t.Errorf("EntityType = %q, want %q", got.EntityType, documentCursorEntityType)
+	if got != 0 {
+		t.Errorf("start = %d, want 0", got)
 	}
-	if len(got.Known) != 0 {
-		t.Errorf("Known = %+v, want leer", got.Known)
+}
+
+// TestDecodeDocumentPageCursor_NegativeStartRejected checks that a technically well-formed but
+// negative Start field (can only originate from a tampered/foreign token) is treated as an error
+// instead of silently passing a negative start on to Documents.Query.
+func TestDecodeDocumentPageCursor_NegativeStartRejected(t *testing.T) {
+	tok, err := encodeDocumentPageCursor(-1)
+	if err != nil {
+		t.Fatalf("encodeDocumentPageCursor(-1): %v", err)
+	}
+	if _, err := decodeDocumentPageCursor(tok); err == nil {
+		t.Fatal("decodeDocumentPageCursor(negative start) = no error, want one")
 	}
 }
 
@@ -2945,7 +2960,7 @@ func TestDecodeCursor_EmptyYieldsFreshDocumentCursor(t *testing.T) {
 // werden.
 func TestListDocuments_BackendErrorIsMapped(t *testing.T) {
 	routes := map[string]mockRoute{
-		"POST /api/documents/rest/diff": {
+		"POST /api/documents/rest/query": {
 			Status: http.StatusNotFound,
 			Body:   []byte(`{"apiError":"NOT_FOUND","errorMessage":"nope"}`),
 		},

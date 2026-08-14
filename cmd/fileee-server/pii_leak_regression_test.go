@@ -28,19 +28,22 @@ const fullAttributesCompanyJSON = `{
 
 // TestListDocuments_NeverLeaksAttributes_EvenWithFullUpstreamData is the permanent regression test
 // for the CRITICAL security-review finding on PR #38 (see registeredResponseBodyTypes doc comment,
-// response_body_safety_test.go): GET /v1/documents (diff/sync mode, no query param) used to return
+// response_body_safety_test.go): GET /v1/documents (page/sync mode, no query param) used to return
 // []fileee.Document directly, and fileee.Document.MarshalJSON unconditionally re-attaches the full
 // attributes.data wire envelope for every element, regardless of the includeAttributes gate that
 // only ever applied to GET /v1/documents/{id}. This test feeds the mock-Fileee backend a document
 // with EVERY mapped attribute field populated (fullAttributesDocumentJSON,
-// handlers_documents_attributes_test.go) through the diff endpoint, with NEITHER the caller opt-in
-// NOR the FILEEE_EXPOSE_ATTRIBUTES gate set (the worst case: default server config), and asserts
-// the response contains no "attributes" key and none of the known PII values.
+// handlers_documents_attributes_test.go) through the query endpoint (page/sync mode now runs
+// over Documents.Query, not Documents.Diff, since the issue #39 cursor-pagination fix), with
+// NEITHER
+// the caller opt-in NOR the FILEEE_EXPOSE_ATTRIBUTES gate set (the worst case: default server
+// config), and asserts the response contains no "attributes" key and none of the known PII
+// values.
 func TestListDocuments_NeverLeaksAttributes_EvenWithFullUpstreamData(t *testing.T) {
 	routes := map[string]mockRoute{
-		"POST /api/documents/rest/diff": {
+		"POST /api/documents/rest/query": {
 			Status: http.StatusOK,
-			Body:   []byte(`{"rows":[` + fullAttributesDocumentJSON + `],"idsToDelete":[],"totalRows":1,"nextCursor":{}}`),
+			Body:   []byte(`{"rows":[` + fullAttributesDocumentJSON + `],"totalRows":1}`),
 		},
 	}
 	_, ts := newTestServer(t, routes) // Default Config: ExposeAttributes=false (zero value)
