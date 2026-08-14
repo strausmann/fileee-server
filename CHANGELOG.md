@@ -1,3 +1,9 @@
+## [0.5.0](https://github.com/strausmann/fileee-server/compare/v0.4.1...v0.5.0) (2026-08-14)
+
+### Features
+
+* **handlers:** single-lookup routes for contacts and companies ([3d50033](https://github.com/strausmann/fileee-server/commit/3d5003346ccfe5191bca65c7fc5071c899735af9)), closes [#38](https://github.com/strausmann/fileee-server/issues/38) [#41](https://github.com/strausmann/fileee-server/issues/41)
+
 ## [0.4.1](https://github.com/strausmann/fileee-server/compare/v0.4.0...v0.4.1) (2026-08-14)
 
 ### Bug Fixes
