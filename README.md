@@ -138,6 +138,7 @@ Feld wird an anderer Stelle direkt aus `os.Getenv` bezogen (einzige Ausnahme: de
 | `FILEEE_TOTP_SEED` | Base32-TOTP-Seed für Zwei-Faktor-Konten | leer | Nein (nur bei 2FA-Konten) | Ja |
 | `FILEEE_API_TOKEN` | Statisches Bearer-Token, mit dem sich Clients gegen den Server authentifizieren (`X-API-Key`- oder `Bearer`-Header) | – | Ja | Ja |
 | `FILEEE_ALLOW_DESTRUCTIVE` | Schaltet die drei Hard-DELETE-Routen frei (siehe Destruktiv-Gate unten) | `false` | Nein | Nein |
+| `FILEEE_EXPOSE_ATTRIBUTES` | Schaltet die Ausgabe von Fileees automatisch extrahierten Indexierungs-Metadaten (`attributes.data`) über `GET /v1/documents/{id}?includeAttributes=true` frei (siehe Attributes-Gate unten) | `false` | Nein | Nein |
 | `FILEEE_LISTEN_ADDR` | Adresse, auf der der HTTP-Server lauscht | `:8080` | Nein | Nein |
 | `FILEEE_SESSION_PATH` | Pfad, unter dem die Fileee-Session persistiert wird | `/home/nonroot/session.json` | Nein | Nein (Dateiinhalt ist sensibel, Rechte `0600`) |
 | `FILEEE_KEEPALIVE_INTERVAL` | Intervall des Session-Keepalive | `15m` | Nein | Nein |
@@ -155,7 +156,7 @@ Feld wird an anderer Stelle direkt aus `os.Getenv` bezogen (einzige Ausnahme: de
 | `FILEEE_USER_AGENT` | Überschreibt den User-Agent gegen Fileee | leer (Core-Lib-Default) | Nein | Nein |
 | `FILEEE_LOG_LEVEL` | Log-Level des strukturierten Loggers (`slog`) | `info` | Nein | Nein |
 
-**21 `FILEEE_*`-Variablen insgesamt** (3 davon Pflicht: `FILEEE_USERNAME`, `FILEEE_PASSWORD`,
+**22 `FILEEE_*`-Variablen insgesamt** (3 davon Pflicht: `FILEEE_USERNAME`, `FILEEE_PASSWORD`,
 `FILEEE_API_TOKEN`).
 
 **Secret-Backend / Infisical-Dual-Mode** (`cmd/fileee-server/secrets.go`, optional — nur relevant, wenn `SECRET_BACKEND=infisical` gesetzt ist oder eine Universal-Auth-Client-ID vorliegt):
@@ -183,7 +184,7 @@ Insgesamt **44 Huma-Operationen + 1 Plain-Mux-Route** (`/healthz`) = **45 HTTP-R
 |---|---|---|---|
 | GET | `/v1/documents` | Liste bzw. Volltextsuche (`?q=`) | Nein |
 | POST | `/v1/documents` | Upload (multipart), Server erkennt Duplikate | Ja |
-| GET | `/v1/documents/{id}` | Einzelabruf | Nein |
+| GET | `/v1/documents/{id}` | Einzelabruf, optional `?includeAttributes=true` (siehe Attributes-Gate unten) | Nein |
 | PUT | `/v1/documents/{id}` | Metadaten ändern (Optimistic Locking über `version`) | Ja |
 | GET | `/v1/documents/{id}/pdf` | Original-PDF als Stream | Nein |
 | GET | `/v1/pages/{pageId}/image` | Seiten-Bild-Fallback als Stream | Nein |
@@ -296,6 +297,58 @@ liegende
 [ADR-0007](https://github.com/strausmann/go-fileee/blob/main/docs/adr/0007-ausschluss-destruktiver-operationen.md)
 (Ausschluss destruktiver Lib-Operationen — durch ADR-0008 für den Server verfeinert, nicht
 abgelöst).
+
+### Attributes-Gate (`FILEEE_EXPOSE_ATTRIBUTES`) — exaktes Verhalten
+
+Fileee klassifiziert und indexiert jedes Dokument automatisch (Dokumenttyp, Absender/Empfänger,
+Tags, Rechnungsdatum, Rechnungsbetrag, IBAN, Kundennummer, …) — dieser Fund liegt intern unter
+`attributes.data` (go-fileee: `fileee.Document.Attributes`). **`GET /v1/documents/{id}`** (Einzelabruf)
+hat diese Metadaten **nie** ausgeliefert (nur `status`, `uploadAttribute`, `pages`,
+`sharedSpaceIds`) — `?includeAttributes=true` liefert sie jetzt **optional** mit, als eigenes,
+typisiertes `attributes`-Objekt (Absender-/Empfänger-**IDs**, Rechnungsnummer, Rechnungs-/
+Ausstellungs-/Fälligkeitsdatum, Beträge, Bankverbindung, Kundennummer, Zahlungsreferenz, Tags, …),
+**nicht** ein roher Passthrough der Fileee-internen Wire-Struktur.
+
+> **Sicherheits-Fund (Security-Review PR #38, behoben im selben PR):** Die obige Aussage galt
+> **korrekt nur für den Einzelabruf**. `GET /v1/documents` (Liste/Diff-Sync, `?query=`-Suche
+> eingeschlossen) sowie **`GET /v1/companies`** setzten `fileee.Document` bzw. `fileee.Company`
+> ungefiltert in ihre Response-Listen — beide Lib-Typen besitzen eine eigene `MarshalJSON`, die den
+> vollen `attributes.data`-Envelope (inkl. aller Rohwerte) **unabhängig vom `json:"-"`-Tag** und
+> **unabhängig von jedem Opt-in/Gate** re-attacht. Jede Dokumentliste/jeder Suchtreffer lieferte
+> damit die volle Finanz-PII (IBAN, Beträge, Kundennummer, Rechnungsnummer/-datum, Absender), jede
+> Firmenliste die volle Firmen-PII (IBANs, USt-IDs, E-Mails, Telefonnummern) — komplett ungegated,
+> unabhängig von diesem Gate hier. Beide sind gefixt (`documentListBody`/`companyListBody`
+> projizieren jetzt auf eigene, sichere Response-DTOs statt die Lib-Typen direkt zu verwenden) und
+> durch einen strukturellen Test dauerhaft abgesichert:
+> `cmd/fileee-server/response_body_safety_test.go` (`TestNoFileeeMarshalerTypeInAnyResponseBody`)
+> scheitert automatisch, sobald künftig irgendein go-fileee-Typ mit eigener `MarshalJSON` erneut
+> — direkt oder verschachtelt — in einem Response-Body auftaucht, egal ob er aktuell PII trägt oder
+> nicht. Permanente Regressionstests: `cmd/fileee-server/pii_leak_regression_test.go`.
+
+**`attributes.data` ist private Finanz-PII** (Rechnungsbeträge, IBAN, Kundennummer, Absender). Die
+Ausgabe ist deshalb — analog zum Destruktiv-Gate — **zweifach** opt-in:
+
+1. **Betreiber-seitig:** `FILEEE_EXPOSE_ATTRIBUTES=true` muss beim Serverstart gesetzt sein.
+2. **Aufrufer-seitig:** der Query-Parameter `?includeAttributes=true` muss auf dem einzelnen Request
+   mitgeschickt werden.
+
+Fehlt **eine** der beiden Zustimmungen, bleibt das Verhalten **exakt** wie zuvor — kein
+`attributes`-Feld im Body. Ist NUR der Parameter gesetzt (Gate aus), antwortet der Server
+**explizit mit 403** (`{"error":"attribute exposure disabled; set FILEEE_EXPOSE_ATTRIBUTES=true to
+enable","code":"attributes_disabled"}`) statt den Parameter still zu ignorieren — der Aufrufer soll
+erkennen, dass er PII angefordert hat, die der Betreiber nicht freigeschaltet hat.
+
+**Migrations-Einsatzzweck (Fileee → DMS, z. B. Paperless-ngx):** die drei wichtigsten Felder für
+eine metadatentragende Migration sind alle enthalten — `senderId` (→ Correspondent), `invoiceId`
+(→ z. B. ASN/Custom-Field, **nicht** zu verwechseln mit der separaten `customerId`) und
+`invoiceDate` (→ z. B. `created`). Vollständige Feldliste: `cmd/fileee-server/attributes.go`
+(`documentAttributesBody`).
+
+| includeAttributes | FILEEE_EXPOSE_ATTRIBUTES | Ergebnis |
+|---|---|---|
+| weggelassen/`false` | egal | unverändert — kein `attributes`-Feld |
+| `true` | `false` (Default) | **403** `attributes_disabled` |
+| `true` | `true` | 200, `attributes`-Feld gesetzt |
 
 ### Interaktive Doku (`/docs`)
 

@@ -127,15 +127,37 @@ type listDocumentsInput struct {
 // documentListBody ist der gemeinsame Response-Body von GET /v1/documents für beide Modi
 // (Design-Spec §17: einheitlicher Output {items, cursor, totalRows}). Cursor bleibt im Suchmodus
 // leer — Documents.Search kennt keinen Diff-Cursor, nur eine Start/Limit-Pagination.
+//
+// Items ist bewusst []documentResponseBody, NICHT []fileee.Document (Security-Review-Fund,
+// PR #38: fileee.Document.MarshalJSON rekonstruiert bei JEDEM direkten Marshal — auch als
+// Slice-Element — den vollen Wire-Envelope {"attributes":{"data":{...}}} inkl. RawExtra,
+// UNABHÄNGIG von jedem `json:"-"`-Tag. Ein []fileee.Document hier hätte den gesamten Issue-#37-
+// Gate (includeAttributes + FILEEE_EXPOSE_ATTRIBUTES) für GET /v1/documents komplett umgangen —
+// jedes Dokument jeder Liste/jedes Suchergebnisses hätte ungegated die volle Finanz-PII geliefert.
+// documentResponseBody wird deshalb hier GENAU WIE bei get/upload/update-document verwendet, aber
+// MIT Attributes==nil (Listen bekommen KEIN opt-in-attributes — nur GET /v1/documents/{id} hat den
+// Gate-Pfad, siehe handleGetDocument). Siehe auch: TestDocumentResponseBody_JSONTagsStayInSyncWithFileeeDocument
+// (Drift-Guard) und response_body_safety_test.go (struktureller Guardrail gegen diese Fehlerklasse).
 type documentListBody struct {
-	Items     []fileee.Document `json:"items" doc:"Dokumente dieser Seite bzw. dieses Suchlaufs."`
-	Cursor    string            `json:"cursor" doc:"Opaques Folge-Cursor-Token für den nächsten Diff-Aufruf (leer im Suchmodus)."`
-	TotalRows int               `json:"totalRows" doc:"Von Fileee gemeldete Gesamtzahl (Suchtreffer bzw. Diff-Zeilen)."`
+	Items     []documentResponseBody `json:"items" doc:"Dokumente dieser Seite bzw. dieses Suchlaufs. Enthält NIE ein \"attributes\"-Feld (kein Opt-in für Listen, siehe Attributes-Gate im README)."`
+	Cursor    string                 `json:"cursor" doc:"Opaques Folge-Cursor-Token für den nächsten Diff-Aufruf (leer im Suchmodus)."`
+	TotalRows int                    `json:"totalRows" doc:"Von Fileee gemeldete Gesamtzahl (Suchtreffer bzw. Diff-Zeilen)."`
 }
 
 // listDocumentsOutput kapselt documentListBody als Huma-Response von GET /v1/documents.
 type listDocumentsOutput struct {
 	Body documentListBody
+}
+
+// mapDocuments projects a []fileee.Document onto []documentResponseBody via newDocumentResponseBody
+// — Attributes bleibt für JEDES Element nil (Listen haben keinen Opt-in-Pfad, siehe
+// documentListBody-Doku).
+func mapDocuments(docs []fileee.Document) []documentResponseBody {
+	out := make([]documentResponseBody, 0, len(docs))
+	for _, doc := range docs {
+		out = append(out, newDocumentResponseBody(doc))
+	}
+	return out
 }
 
 // handleListDocuments implementiert GET /v1/documents. Ist Query gesetzt, sucht sie per
@@ -163,7 +185,7 @@ func (s *Server) handleListDocuments(ctx context.Context, in *listDocumentsInput
 			}
 			items = append(items, *doc)
 		}
-		return &listDocumentsOutput{Body: documentListBody{Items: items, TotalRows: res.TotalRows}}, nil
+		return &listDocumentsOutput{Body: documentListBody{Items: mapDocuments(items), TotalRows: res.TotalRows}}, nil
 	}
 
 	cursor, err := decodeCursor(in.Cursor)
@@ -178,7 +200,7 @@ func (s *Server) handleListDocuments(ctx context.Context, in *listDocumentsInput
 	if err != nil {
 		return nil, mapError(err)
 	}
-	return &listDocumentsOutput{Body: documentListBody{Items: diff.Rows, Cursor: nextCursor, TotalRows: diff.TotalRows}}, nil
+	return &listDocumentsOutput{Body: documentListBody{Items: mapDocuments(diff.Rows), Cursor: nextCursor, TotalRows: diff.TotalRows}}, nil
 }
 
 // encodeCursor verpackt einen Lib-Cursor (fileee.Cursor) als opakes Web-Token: JSON-Serialisierung,
@@ -220,24 +242,46 @@ func decodeCursorToken(s string) (fileee.Cursor, error) {
 	return c, nil
 }
 
-// getDocumentInput steuert GET /v1/documents/{id}.
+// getDocumentInput steuert GET /v1/documents/{id}. IncludeAttributes ist das Issue-#37-Opt-in für
+// Fileees automatisch extrahierte Indexierungs-Metadaten (attributes.data, siehe attributes.go) —
+// weggelassen/false ändert am Response-Body NICHTS gegenüber dem Vorzustand.
 type getDocumentInput struct {
-	ID string `path:"id" doc:"Dokument-ID."`
+	ID                string `path:"id" doc:"Dokument-ID."`
+	IncludeAttributes bool   `query:"includeAttributes" doc:"Opt-in: Fileees automatisch extrahierte Indexierungs-Metadaten (Dokumenttyp, Absender/Empfänger, Tags, Rechnungsdaten, IBAN, Kundennummer, ...) im Response-Body unter \"attributes\" mitliefern. Braucht zusätzlich das serverseitige FILEEE_EXPOSE_ATTRIBUTES-Gate — ohne dieses Gate liefert ein gesetztes includeAttributes=true 403 statt der Metadaten (private Finanz-PII, niemals Default-on, siehe README)." default:"false"`
 }
 
-// getDocumentOutput ist der Response-Body von GET /v1/documents/{id}: das vollständige
-// fileee.Document (inkl. Attributes/Pages).
+// getDocumentOutput ist der Response-Body von GET/POST/PUT /v1/documents/{id}: das vollständige
+// fileee.Document (inkl. Pages) plus dem optionalen, Issue-#37-gegateten "attributes"-Feld — siehe
+// documentResponseBody (attributes.go).
 type getDocumentOutput struct {
-	Body fileee.Document
+	Body documentResponseBody
 }
 
-// handleGetDocument implementiert GET /v1/documents/{id} — dünner Durchgriff auf Documents.Get.
+// handleGetDocument implementiert GET /v1/documents/{id} — ein dünner Durchgriff auf
+// Documents.Get, ergänzt um das Issue-#37-Opt-in für attributes.data. Das Opt-in braucht ZWEI
+// unabhängige Zustimmungen: den Aufrufer-seitigen Query-Parameter (in.IncludeAttributes) UND das
+// Betreiber-seitige FILEEE_EXPOSE_ATTRIBUTES-Gate (s.cfg.ExposeAttributes) — fehlt eine der
+// beiden, bleibt das Verhalten unverändert (kein "attributes"-Feld), fehlt NUR das Gate bei
+// gesetztem Parameter, antwortet der Handler explizit mit 403 statt den Parameter still zu
+// ignorieren (der Aufrufer soll erkennen, dass er PII angefordert hat, die der Betreiber nicht
+// freigeschaltet hat — kein leises Weglassen).
 func (s *Server) handleGetDocument(ctx context.Context, in *getDocumentInput) (*getDocumentOutput, error) {
+	if in.IncludeAttributes && !s.cfg.ExposeAttributes {
+		return nil, newStatusError(http.StatusForbidden, "attributes_disabled",
+			"attribute exposure disabled; set FILEEE_EXPOSE_ATTRIBUTES=true to enable")
+	}
+
 	doc, err := s.fc.Documents.Get(ctx, in.ID)
 	if err != nil {
 		return nil, mapError(err)
 	}
-	return &getDocumentOutput{Body: *doc}, nil
+
+	body := newDocumentResponseBody(*doc)
+	if in.IncludeAttributes && s.cfg.ExposeAttributes {
+		attrs := mapDocumentAttributes(doc.Attributes)
+		body.Attributes = &attrs
+	}
+	return &getDocumentOutput{Body: body}, nil
 }
 
 // downloadDocumentPDFInput steuert GET /v1/documents/{id}/pdf.
@@ -397,7 +441,7 @@ func (s *Server) handleUploadDocument(ctx context.Context, in *uploadDocumentInp
 		}
 		return nil, mapError(err)
 	}
-	return &getDocumentOutput{Body: *res.Document}, nil
+	return &getDocumentOutput{Body: newDocumentResponseBody(*res.Document)}, nil
 }
 
 // updateDocumentInput steuert PUT /v1/documents/{id}. Die Pfad-id ist maßgeblich — sie überschreibt
@@ -417,7 +461,7 @@ func (s *Server) handleUpdateDocument(ctx context.Context, in *updateDocumentInp
 	if err != nil {
 		return nil, mapError(err)
 	}
-	return &getDocumentOutput{Body: *updated}, nil
+	return &getDocumentOutput{Body: newDocumentResponseBody(*updated)}, nil
 }
 
 // exportZipRequest ist der Body von POST /v1/documents/export-zip (Design-Spec §4.2). Eine leere

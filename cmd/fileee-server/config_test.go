@@ -43,6 +43,7 @@ func TestLoadConfig_AllDefaults(t *testing.T) {
 		FileeeTOTPSeed:    "",
 		APIToken:          "t",
 		AllowDestructive:  false,
+		ExposeAttributes:  false,
 		ListenAddr:        ":8080",
 		SessionPath:       "/home/nonroot/session.json",
 		KeepAliveInterval: 15 * time.Minute,
@@ -72,6 +73,7 @@ func TestLoadConfig_Overrides(t *testing.T) {
 	env := requiredEnv()
 	env["FILEEE_TOTP_SEED"] = "SEED123"
 	env["FILEEE_ALLOW_DESTRUCTIVE"] = "true"
+	env["FILEEE_EXPOSE_ATTRIBUTES"] = "true"
 	env["FILEEE_LISTEN_ADDR"] = ":9090"
 	env["FILEEE_SESSION_PATH"] = "/tmp/session.json"
 	env["FILEEE_KEEPALIVE_INTERVAL"] = "5m"
@@ -105,6 +107,9 @@ func TestLoadConfig_Overrides(t *testing.T) {
 	}
 	if !c.AllowDestructive {
 		t.Error("AllowDestructive sollte true sein")
+	}
+	if !c.ExposeAttributes {
+		t.Error("ExposeAttributes sollte true sein")
 	}
 	if c.ListenAddr != ":9090" {
 		t.Errorf("ListenAddr = %q", c.ListenAddr)
@@ -158,14 +163,20 @@ func TestLoadConfig_Overrides(t *testing.T) {
 		t.Error("BootSelfcheck sollte true sein")
 	}
 
-	// FILEEE_ALLOW_DESTRUCTIVE="1" ist die zweite akzeptierte Bool-Schreibweise.
+	// FILEEE_ALLOW_DESTRUCTIVE="1" ist die zweite akzeptierte Bool-Schreibweise. FILEEE_EXPOSE_
+	// ATTRIBUTES nutzt denselben getBool-Helfer wie AllowDestructive — hier zusätzlich in derselben
+	// Zeile mitgeprüft statt eines eigenen Tests, da die Parsing-Logik bereits generisch getestet ist.
 	env["FILEEE_ALLOW_DESTRUCTIVE"] = "1"
+	env["FILEEE_EXPOSE_ATTRIBUTES"] = "1"
 	c2, err := LoadConfig(func(k string) string { return env[k] })
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !c2.AllowDestructive {
 		t.Error(`AllowDestructive sollte bei "1" true sein`)
+	}
+	if !c2.ExposeAttributes {
+		t.Error(`ExposeAttributes sollte bei "1" true sein`)
 	}
 }
 

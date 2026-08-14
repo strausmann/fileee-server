@@ -14,14 +14,22 @@ import (
 type emptyInput struct{}
 
 // entityListBody ist der einheitliche Response-Body der generischen Stammdaten-Listen (Tags,
-// Companies, Contacts, DocumentTypes, DocumentTypeSchemes, Reminders) — sie teilen sich alle
-// dieselbe Query/Diff/Get-Konvention (fileee.ReadService[T], fileee/service.go) und liefern hier
-// deshalb dieselbe {items, totalRows}-Form. Ein Diff-Cursor ist für diese Ressourcen (Stand
-// dieser Task) bewusst NICHT exponiert — anders als bei /v1/documents gibt es dafür noch keinen
-// dokumentierten Bedarf; die erste Query-Seite (Default-Limit 100 aus fileee.QueryOptions.toWire)
-// genügt für den aktuellen Read-Scope. Auch von listBoxesOutput wiederverwendet (Boxes.List kennt
-// kein Query/TotalRows-Ergebnis wie die generischen ReadServices — TotalRows wird dort aus
-// len(Items) abgeleitet).
+// Contacts, DocumentTypes, DocumentTypeSchemes, Reminders) — sie teilen sich alle dieselbe
+// Query/Diff/Get-Konvention (fileee.ReadService[T], fileee/service.go) und liefern hier deshalb
+// dieselbe {items, totalRows}-Form. Ein Diff-Cursor ist für diese Ressourcen (Stand dieser Task)
+// bewusst NICHT exponiert — anders als bei /v1/documents gibt es dafür noch keinen dokumentierten
+// Bedarf; die erste Query-Seite (Default-Limit 100 aus fileee.QueryOptions.toWire) genügt für den
+// aktuellen Read-Scope. Auch von listBoxesOutput wiederverwendet (Boxes.List kennt kein
+// Query/TotalRows-Ergebnis wie die generischen ReadServices — TotalRows wird dort aus len(Items)
+// abgeleitet).
+//
+// Companies nutzt DIESEN generischen Typ NICHT (mehr) — siehe companyListBody/handleListCompanies:
+// fileee.Company hat wie fileee.Document eine eigene MarshalJSON, die unabhängig vom `json:"-"`-Tag
+// immer die volle attributes.data (IBANs, VAT-IDs, E-Mails, Telefonnummern, …) mit ausliefert.
+// entityListBody[T] setzt T direkt und ungefiltert in Items ein — für jeden Typ mit eigener
+// MarshalJSON wäre das derselbe Leak wie bei documentListBody (siehe dessen Doku). Ein T-Element
+// OHNE eigene MarshalJSON (Tag/Contact/DocumentType/DocumentTypeScheme/Reminder/Box — alle
+// verifiziert, siehe response_body_safety_test.go) ist dagegen unbedenklich.
 type entityListBody[T any] struct {
 	Items     []T `json:"items" doc:"Erste Seite der Ressource (Default-Limit 100)."`
 	TotalRows int `json:"totalRows" doc:"Von Fileee gemeldete (bzw. bei Boxes aus der Listenlänge abgeleitete) Gesamtzahl."`
@@ -33,9 +41,10 @@ type entityListOutput[T any] struct {
 }
 
 // registerEntityListRoute registriert eine parameterlose GET-Liste für einen generischen
-// fileee.ReadService[T]. Tags/Companies/Contacts/DocumentTypes/DocumentTypeSchemes/Reminders
-// teilen sich exakt diese Signatur (fileee/service.go ReadService[T].Query) — query wird deshalb
-// direkt als Methodenwert übergeben (z.B. s.fc.Tags.Query), ganz ohne Wrapper-Closure.
+// fileee.ReadService[T]. NUR für T OHNE eigene MarshalJSON verwenden (siehe entityListBody-Doku) —
+// Tags/Contacts/DocumentTypes/DocumentTypeSchemes/Reminders teilen sich exakt diese Signatur
+// (fileee/service.go ReadService[T].Query) — query wird deshalb direkt als Methodenwert übergeben
+// (z.B. s.fc.Tags.Query), ganz ohne Wrapper-Closure.
 func registerEntityListRoute[T any](api huma.API, operationID, path string, query func(ctx context.Context, opts fileee.QueryOptions) (*fileee.QueryResult[T], error)) {
 	huma.Register(api, huma.Operation{
 		OperationID: operationID,
@@ -48,6 +57,84 @@ func registerEntityListRoute[T any](api huma.API, operationID, path string, quer
 		}
 		return &entityListOutput[T]{Body: entityListBody[T]{Items: res.Rows, TotalRows: res.TotalRows}}, nil
 	})
+}
+
+// companyResponseBody mirrors fileee.Company's PUBLIC fields (same JSON tags, no embedding) —
+// exactly the same pattern and rationale as documentResponseBody/newDocumentResponseBody
+// (attributes.go). fileee.Company carries its own MarshalJSON (fileee/types.go) that — like
+// fileee.Document — ALWAYS reconstructs the wire envelope {"attributes":{"data":{...}}} from its
+// otherwise `json:"-"`-tagged Attributes field (fileee.CompanyAttributes: IBANs, VAT IDs, emails,
+// phone numbers, websites, German tax IDs, plus any RawExtra).
+//
+// Found during the Issue #37 security review (PR #38): GET /v1/companies used
+// entityListBody[fileee.Company] directly, so EVERY company in EVERY response leaked its full,
+// UNGATED attributes.data — no opt-in, no FILEEE_EXPOSE_ATTRIBUTES gate, unrelated to (and
+// pre-dating) Issue #37's own Document-attributes gate. companyResponseBody/
+// newCompanyResponseBody close that leak the same way newDocumentResponseBody does: explicit field
+// mirroring, Attributes never copied anywhere. There is currently no opt-in/gate design for
+// company attributes (out of scope here) — they are simply never exposed, matching the field's own
+// `json:"-"` tag, which fileee.Company.MarshalJSON was silently overriding.
+type companyResponseBody struct {
+	ID              string `json:"id"`
+	Version         int64  `json:"version"`
+	Created         string `json:"created"`
+	Modified        string `json:"modified"`
+	Deleted         bool   `json:"deleted"`
+	CompanyName     string `json:"companyName"`
+	ContactType     string `json:"contactType"`
+	ContactStatus   string `json:"contactStatus"`
+	DocumentCounter int    `json:"documentCounter"`
+	Connected       bool   `json:"connected"`
+	FromUserDB      bool   `json:"fromUserDb"`
+	HasLogo         bool   `json:"hasLogo"`
+}
+
+// newCompanyResponseBody copies every fileee.Company field EXCEPT Attributes (SAME json tags, see
+// companyResponseBody) — analogous to newDocumentResponseBody.
+func newCompanyResponseBody(c fileee.Company) companyResponseBody {
+	return companyResponseBody{
+		ID:              c.ID,
+		Version:         c.Version,
+		Created:         c.Created,
+		Modified:        c.Modified,
+		Deleted:         c.Deleted,
+		CompanyName:     c.CompanyName,
+		ContactType:     c.ContactType,
+		ContactStatus:   c.ContactStatus,
+		DocumentCounter: c.DocumentCounter,
+		Connected:       c.Connected,
+		FromUserDB:      c.FromUserDB,
+		HasLogo:         c.HasLogo,
+	}
+}
+
+// companyListBody is the response body of GET /v1/companies — same {items, totalRows} shape as
+// entityListBody[T], but with a dedicated, mapped Items type instead of the generic T (see
+// companyResponseBody doc comment for why fileee.Company itself can never appear here).
+type companyListBody struct {
+	Items     []companyResponseBody `json:"items" doc:"Erste Seite der Firmen (Default-Limit 100). Enthält NIE ein \"attributes\"-Feld."`
+	TotalRows int                   `json:"totalRows" doc:"Von Fileee gemeldete Gesamtzahl."`
+}
+
+// listCompaniesOutput kapselt companyListBody als Huma-Response von GET /v1/companies.
+type listCompaniesOutput struct {
+	Body companyListBody
+}
+
+// handleListCompanies implementiert GET /v1/companies — bewusst AUSSERHALB von
+// registerEntityListRoute[T] (wie schon handleListBoxes), weil companyResponseBody eine Mapping-
+// Stufe zwischen fileee.Company und dem Response-Body braucht (companyListBody-Doku), die der
+// generische Helfer (der T unverändert in entityListBody[T] durchreicht) nicht abbildet.
+func (s *Server) handleListCompanies(ctx context.Context, in *emptyInput) (*listCompaniesOutput, error) {
+	res, err := s.fc.Companies.Query(ctx, fileee.QueryOptions{})
+	if err != nil {
+		return nil, mapError(err)
+	}
+	items := make([]companyResponseBody, 0, len(res.Rows))
+	for _, c := range res.Rows {
+		items = append(items, newCompanyResponseBody(c))
+	}
+	return &listCompaniesOutput{Body: companyListBody{Items: items, TotalRows: res.TotalRows}}, nil
 }
 
 // getBoxInput steuert GET /v1/boxes/{id}.
@@ -74,7 +161,11 @@ type listBoxesOutput struct {
 // übersetzen Fehler ausschließlich über mapError.
 func (s *Server) registerEntityRoutes(api huma.API) {
 	registerEntityListRoute(api, "list-tags", "/v1/tags", s.fc.Tags.Query)
-	registerEntityListRoute(api, "list-companies", "/v1/companies", s.fc.Companies.Query)
+	huma.Register(api, huma.Operation{
+		OperationID: "list-companies",
+		Method:      http.MethodGet,
+		Path:        "/v1/companies",
+	}, s.handleListCompanies)
 	registerEntityListRoute(api, "list-contacts", "/v1/contacts", s.fc.Contacts.Query)
 	registerEntityListRoute(api, "list-document-types", "/v1/document-types", s.fc.DocumentTypes.Query)
 	registerEntityListRoute(api, "list-document-type-schemes", "/v1/document-type-schemes", s.fc.DocumentTypeSchemes.Query)
