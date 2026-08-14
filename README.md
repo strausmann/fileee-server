@@ -302,12 +302,28 @@ abgelöst).
 
 Fileee klassifiziert und indexiert jedes Dokument automatisch (Dokumenttyp, Absender/Empfänger,
 Tags, Rechnungsdatum, Rechnungsbetrag, IBAN, Kundennummer, …) — dieser Fund liegt intern unter
-`attributes.data` (go-fileee: `fileee.Document.Attributes`) und wurde bis inkl. der letzten Version
-**grundsätzlich nicht** über die API ausgeliefert (nur `status`, `uploadAttribute`, `pages`,
-`sharedSpaceIds`). `GET /v1/documents/{id}?includeAttributes=true` liefert diese Metadaten jetzt
-optional mit — als eigenes, typisiertes `attributes`-Objekt (Absender-/Empfänger-**IDs**,
-Rechnungsnummer, Rechnungs-/Ausstellungs-/Fälligkeitsdatum, Beträge, Bankverbindung, Kundennummer,
-Zahlungsreferenz, Tags, …), **nicht** ein roher Passthrough der Fileee-internen Wire-Struktur.
+`attributes.data` (go-fileee: `fileee.Document.Attributes`). **`GET /v1/documents/{id}`** (Einzelabruf)
+hat diese Metadaten **nie** ausgeliefert (nur `status`, `uploadAttribute`, `pages`,
+`sharedSpaceIds`) — `?includeAttributes=true` liefert sie jetzt **optional** mit, als eigenes,
+typisiertes `attributes`-Objekt (Absender-/Empfänger-**IDs**, Rechnungsnummer, Rechnungs-/
+Ausstellungs-/Fälligkeitsdatum, Beträge, Bankverbindung, Kundennummer, Zahlungsreferenz, Tags, …),
+**nicht** ein roher Passthrough der Fileee-internen Wire-Struktur.
+
+> **Sicherheits-Fund (Security-Review PR #38, behoben im selben PR):** Die obige Aussage galt
+> **korrekt nur für den Einzelabruf**. `GET /v1/documents` (Liste/Diff-Sync, `?query=`-Suche
+> eingeschlossen) sowie **`GET /v1/companies`** setzten `fileee.Document` bzw. `fileee.Company`
+> ungefiltert in ihre Response-Listen — beide Lib-Typen besitzen eine eigene `MarshalJSON`, die den
+> vollen `attributes.data`-Envelope (inkl. aller Rohwerte) **unabhängig vom `json:"-"`-Tag** und
+> **unabhängig von jedem Opt-in/Gate** re-attacht. Jede Dokumentliste/jeder Suchtreffer lieferte
+> damit die volle Finanz-PII (IBAN, Beträge, Kundennummer, Rechnungsnummer/-datum, Absender), jede
+> Firmenliste die volle Firmen-PII (IBANs, USt-IDs, E-Mails, Telefonnummern) — komplett ungegated,
+> unabhängig von diesem Gate hier. Beide sind gefixt (`documentListBody`/`companyListBody`
+> projizieren jetzt auf eigene, sichere Response-DTOs statt die Lib-Typen direkt zu verwenden) und
+> durch einen strukturellen Test dauerhaft abgesichert:
+> `cmd/fileee-server/response_body_safety_test.go` (`TestNoFileeeMarshalerTypeInAnyResponseBody`)
+> scheitert automatisch, sobald künftig irgendein go-fileee-Typ mit eigener `MarshalJSON` erneut
+> — direkt oder verschachtelt — in einem Response-Body auftaucht, egal ob er aktuell PII trägt oder
+> nicht. Permanente Regressionstests: `cmd/fileee-server/pii_leak_regression_test.go`.
 
 **`attributes.data` ist private Finanz-PII** (Rechnungsbeträge, IBAN, Kundennummer, Absender). Die
 Ausgabe ist deshalb — analog zum Destruktiv-Gate — **zweifach** opt-in:

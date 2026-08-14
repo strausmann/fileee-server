@@ -122,12 +122,36 @@ type documentResponseBody struct {
 	Deleted          bool                        `json:"deleted"`
 	Status           fileee.PublicDocumentStatus `json:"status"`
 	Type             string                      `json:"type"`
-	Pages            []fileee.Page               `json:"pages"`
+	Pages            []pageBody                  `json:"pages"`
 	UploadAttribute  fileee.UploadAttribute      `json:"uploadAttribute"`
 	SharedSpaceIDs   []string                    `json:"sharedSpaceIds"`
 	ShareInformation fileee.ShareInformation     `json:"shareInformation"`
 	ForbiddenActions []fileee.DocumentAction     `json:"forbiddenActions"`
 	Attributes       *documentAttributesBody     `json:"attributes,omitempty" doc:"Fileees automatisch extrahierte Indexierungs-Metadaten (attributes.data) — NUR gesetzt bei GET /v1/documents/{id}?includeAttributes=true UND aktiviertem FILEEE_EXPOSE_ATTRIBUTES-Gate. Enthält private Finanz-PII (Rechnungsdaten, IBAN, Kundennummer, Absender/Empfänger, ...) — siehe README-Abschnitt \"Attributes-Gate\"."`
+}
+
+// pageBody mirrors fileee.Page (same JSON keys) with plain int64 fields instead of go-fileee's
+// flexInt64 (fileee/types.go) — flexInt64 implements its own MarshalJSON purely for a wire-format
+// leniency INBOUND (Fileee sometimes sends imageVersion/contentVersion as a JSON string, sometimes
+// as a number; flexInt64.UnmarshalJSON handles both). That leniency is a non-issue OUTBOUND: this
+// server always controls its own emitted JSON, so a plain int64 suffices — and, per the Security-
+// Review finding on PR #38 (response_body_safety_test.go), NO go-fileee type that implements
+// json.Marshaler may appear in a response body, flexInt64 included, even though this particular
+// case carries no PII (unlike Document/Company) — the invariant is kept absolute so a future
+// go-fileee type addition can't quietly reopen the same class of leak.
+type pageBody struct {
+	ID             string `json:"id"`
+	ImageVersion   int64  `json:"imageVersion"`
+	ContentVersion int64  `json:"contentVersion"`
+}
+
+// mapPages projects []fileee.Page onto []pageBody — see pageBody doc comment.
+func mapPages(pages []fileee.Page) []pageBody {
+	out := make([]pageBody, 0, len(pages))
+	for _, p := range pages {
+		out = append(out, pageBody{ID: p.ID, ImageVersion: int64(p.ImageVersion), ContentVersion: int64(p.ContentVersion)})
+	}
+	return out
 }
 
 // newDocumentResponseBody copies every fileee.Document field (SAME json tags, see
@@ -144,7 +168,7 @@ func newDocumentResponseBody(doc fileee.Document) documentResponseBody {
 		Deleted:          doc.Deleted,
 		Status:           doc.Status,
 		Type:             doc.Type,
-		Pages:            doc.Pages,
+		Pages:            mapPages(doc.Pages),
 		UploadAttribute:  doc.UploadAttribute,
 		SharedSpaceIDs:   doc.SharedSpaceIDs,
 		ShareInformation: doc.ShareInformation,
