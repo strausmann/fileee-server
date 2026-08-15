@@ -13,6 +13,18 @@ import (
 // response_body_safety_test.go setzt ihn für die Dauer des Aufbaus eines *Server, um die REALE
 // Liste registrierter Response-Body-Typen abzuleiten, statt sich auf eine handgepflegte Liste zu
 // verlassen, die (Issue #43) unbemerkt von der tatsächlichen Verdrahtung abweichen kann.
+//
+// Package-globaler, veränderlicher Zustand — sicher NUR unter der Annahme sequenzieller
+// Testausführung in diesem Paket: kein Test hier ruft aktuell t.Parallel() auf (Stand PR #46,
+// verifiziert per grep über cmd/fileee-server/*_test.go). Diese Annahme ist eine stillschweigende
+// Voraussetzung des Mechanismus, nicht vom Compiler erzwungen — würde künftig ein Test in diesem
+// Paket t.Parallel() aufrufen, könnte der von registeredResponseBodyTypesFromRealServer gesetzte
+// Recorder von einem GLEICHZEITIG laufenden anderen Test überschrieben oder vorzeitig auf nil
+// zurückgesetzt werden (klassisches Datenrennen auf einer package-globalen Variable, von
+// `go test -race` erkennbar, sobald tatsächlich parallel zugegriffen wird). Vor Einführung von
+// t.Parallel() in diesem Paket müsste dieser Mechanismus auf ein aufrufscope-gebundenes Muster
+// (z. B. ein über den Test-Kontext gereichter Recorder statt einer Package-Variable) umgestellt
+// werden.
 var operationBodyTypeRecorder func(reflect.Type)
 
 // registerOperation ist ein Drop-in-Wrapper um huma.Register mit IDENTISCHEM Verhalten — jeder

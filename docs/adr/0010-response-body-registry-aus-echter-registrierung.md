@@ -1,15 +1,10 @@
-# ADR-0009: DTO-Leak-Guardrail wird aus der echten `huma.Register`-Verdrahtung abgeleitet
+# ADR-0010: DTO-Leak-Guardrail wird aus der echten `huma.Register`-Verdrahtung abgeleitet
 
 **Status:** proposed
 **Datum:** 2026-08-15
 **Ersetzt:** —
 **Ersetzt durch:** —
-**Verwandt:** `.claude/rules/api-response-dto-boundary.md` (homelab-management-Repo)
-
-> **Hinweis (parallele PR):** Ein zweites, unabhängiges PR (Issue #44, Upstream-Timeout) legt
-> zeitgleich ebenfalls ein `docs/adr/0009-*.md` an. Je nachdem, welches PR zuerst gemergt wird,
-> muss eines der beiden auf `0010` umnummeriert werden (Registry entsprechend nachziehen) — siehe
-> PR-Beschreibung.
+**Verwandt:** `.claude/rules/api-response-dto-boundary.md` (homelab-management-Repo), [ADR-0009](0009-upstream-timeout.md)
 
 ## Kontext
 
@@ -45,7 +40,7 @@ Vollständiger Issue-Text: [#43](https://github.com/strausmann/fileee-server/iss
    Registrierungsweg.** `operation_registry.go` definiert einen Drop-in-Wrapper mit identischem
    Verhalten (delegiert 1:1 an `huma.Register`), der zusätzlich — nur wenn ein Test-Hook
    (`operationBodyTypeRecorder`, im Normalbetrieb `nil`, keine Laufzeitkosten) gesetzt ist — den
-   Go-Typ des Response-Bodys jeder Operation meldet. Alle 41 bestehenden `huma.Register`-Aufrufe
+   Go-Typ des Response-Bodys jeder Operation meldet. Alle 42 bestehenden `huma.Register`-Aufrufe
    (6 Dateien: `handlers_documents.go`, `handlers_entities.go`, `handlers_share.go`,
    `handlers_conversations.go`, `handlers_destructive.go`, `resolve.go`) wurden mechanisch auf
    `registerOperation` umgestellt.
@@ -75,7 +70,7 @@ Vollständiger Issue-Text: [#43](https://github.com/strausmann/fileee-server/iss
   jemand daran gedacht hat, eine Liste zu pflegen.
 - Die Gegenprobe ist empirisch, nicht behauptet: der Beweis, dass der neue Mechanismus wirkt (und
   der alte HTTP-Test allein es nicht getan hätte), liegt im PR-Testnachweis.
-- `registerOperation` ist für alle 41 bestehenden Aufrufstellen ein reiner Drop-in — keine
+- `registerOperation` ist für alle 42 bestehenden Aufrufstellen ein reiner Drop-in — keine
   Verhaltensänderung an der eigentlichen API, nur an der Test-Infrastruktur.
 
 **Negativ / bewusst in Kauf genommen:**
