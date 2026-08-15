@@ -36,7 +36,7 @@ beschreibt) und führt die Nummerierung fort statt neu bei `0001` zu beginnen.
 | Nr. | Titel | Status | Datum |
 |-----|-------|--------|-------|
 | [0008](0008-fileee-server.md) | fileee-server — REST-API-Service (Single-Tenant, geguardetes Löschen) | proposed | 2026-07-24 |
-| 0009 | Upstream-Timeout als Server-Middleware mit Routen-Ausnahmeliste (PR #45, Issue #44 — auf Branch `fix/upstream-timeout`, noch nicht in `main`) | proposed | 2026-08-15 |
+| [0009](0009-upstream-timeout.md) | Upstream-Timeout als Server-Middleware mit Routen-Ausnahmeliste | proposed | 2026-08-15 |
 | [0010](0010-response-body-registry-aus-echter-registrierung.md) | DTO-Leak-Guardrail wird aus der echten `huma.Register`-Verdrahtung abgeleitet | proposed | 2026-08-15 |
 
 ## Status-Werte

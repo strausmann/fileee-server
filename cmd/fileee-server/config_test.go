@@ -49,6 +49,7 @@ func TestLoadConfig_AllDefaults(t *testing.T) {
 		KeepAliveInterval: 15 * time.Minute,
 		WaitTimeout:       60 * time.Second,
 		WaitMax:           300 * time.Second,
+		UpstreamTimeout:   30 * time.Second,
 		RateRPS:           1,
 		RateBurst:         3,
 		TrustedProxies:    nil,
@@ -79,6 +80,7 @@ func TestLoadConfig_Overrides(t *testing.T) {
 	env["FILEEE_KEEPALIVE_INTERVAL"] = "5m"
 	env["FILEEE_WAIT_TIMEOUT"] = "10s"
 	env["FILEEE_WAIT_MAX"] = "90s"
+	env["FILEEE_UPSTREAM_TIMEOUT"] = "5s"
 	env["FILEEE_RATE_RPS"] = "2.5"
 	env["FILEEE_RATE_BURST"] = "7"
 	env["FILEEE_TRUSTED_PROXIES"] = "10.0.0.1, 10.0.0.2 ,,10.0.0.3"
@@ -125,6 +127,9 @@ func TestLoadConfig_Overrides(t *testing.T) {
 	}
 	if c.WaitMax != 90*time.Second {
 		t.Errorf("WaitMax = %v", c.WaitMax)
+	}
+	if c.UpstreamTimeout != 5*time.Second {
+		t.Errorf("UpstreamTimeout = %v", c.UpstreamTimeout)
 	}
 	if c.RateRPS != 2.5 {
 		t.Errorf("RateRPS = %v", c.RateRPS)
@@ -187,6 +192,7 @@ func TestLoadConfig_InvalidValuesFallBackToDefault(t *testing.T) {
 	env["FILEEE_RATE_RPS"] = "not-a-float"
 	env["FILEEE_RATE_BURST"] = "not-an-int"
 	env["FILEEE_KEEPALIVE_INTERVAL"] = "not-a-duration"
+	env["FILEEE_UPSTREAM_TIMEOUT"] = "not-a-duration-either"
 	env["FILEEE_MAX_UPLOAD_SIZE"] = "not-an-int64"
 	env["FILEEE_ALLOW_DESTRUCTIVE"] = "yes-please"
 
@@ -202,6 +208,9 @@ func TestLoadConfig_InvalidValuesFallBackToDefault(t *testing.T) {
 	}
 	if c.KeepAliveInterval != 15*time.Minute {
 		t.Errorf("KeepAliveInterval = %v, erwartet Default 15m", c.KeepAliveInterval)
+	}
+	if c.UpstreamTimeout != 30*time.Second {
+		t.Errorf("UpstreamTimeout = %v, erwartet Default 30s", c.UpstreamTimeout)
 	}
 	if c.MaxUploadBytes != 32<<20 {
 		t.Errorf("MaxUploadBytes = %v, erwartet Default 32MiB", c.MaxUploadBytes)

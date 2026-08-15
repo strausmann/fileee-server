@@ -56,6 +56,18 @@ type Config struct {
 	// (FILEEE_WAIT_MAX, Default 300s).
 	WaitMax time.Duration
 
+	// UpstreamTimeout deckelt jeden Upstream-Roundtrip gegen Fileee auf eine feste Frist
+	// (FILEEE_UPSTREAM_TIMEOUT, Default 30s über LoadConfig; 0 = deaktiviert). Adressiert
+	// Issue #44: go-fileees defaultTransport() setzt zwar ResponseHeaderTimeout=30s, aber
+	// BEWUSST kein http.Client.Timeout (siehe go-fileee/fileee/client.go-Doku — würde große
+	// Uploads/ZIP-Exports mittendrin abschneiden), sodass ein wedged Fileee-Backend jeden
+	// authentifizierten Request unbegrenzt hängen lassen konnte, statt mit 504 zu scheitern
+	// (server.go UpstreamTimeout-Middleware, errors.go mapError). 0 als "aus"-Wert (statt eines
+	// erzwungenen Minimalwerts) ist bewusst konsistent mit WatchInterval — Config{}-Literale in
+	// den bestehenden Handler-Tests bleiben dadurch unverändert unbegrenzt, nur LoadConfig
+	// (echter Serverstart) aktiviert den Default.
+	UpstreamTimeout time.Duration
+
 	// RateRPS ist die erlaubte Request-Rate pro Sekunde gegen die Fileee-API
 	// (FILEEE_RATE_RPS, Default 1).
 	RateRPS float64
@@ -147,6 +159,7 @@ func LoadConfig(getenv func(string) string) (Config, error) {
 		KeepAliveInterval: getDuration(getenv, "FILEEE_KEEPALIVE_INTERVAL", 15*time.Minute),
 		WaitTimeout:       getDuration(getenv, "FILEEE_WAIT_TIMEOUT", 60*time.Second),
 		WaitMax:           getDuration(getenv, "FILEEE_WAIT_MAX", 300*time.Second),
+		UpstreamTimeout:   getDuration(getenv, "FILEEE_UPSTREAM_TIMEOUT", 30*time.Second),
 		RateRPS:           getFloat(getenv, "FILEEE_RATE_RPS", 1),
 		RateBurst:         getInt(getenv, "FILEEE_RATE_BURST", 3),
 		TrustedProxies:    getCSV(getenv, "FILEEE_TRUSTED_PROXIES", nil),

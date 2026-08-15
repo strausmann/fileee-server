@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -9,6 +10,12 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/strausmann/go-fileee/fileee"
 )
+
+// clientClosedRequestStatus (499) markiert einen vom AUFRUFER abgebrochenen Request
+// (context.Canceled, siehe mapError) — die verbreitete nginx-Konvention für "der Client ist weg,
+// bevor eine Antwort feststand". Kein offizieller IANA-HTTP-Statuscode, daher exportiert
+// net/http keine passende Konstante (anders als z. B. http.StatusGatewayTimeout).
+const clientClosedRequestStatus = 499
 
 // statusError ist der eigene Huma-Fehlertyp von fileee-server. Er erfüllt huma.StatusError
 // (GetStatus/Error), liefert im JSON-Response-Body aber AUSSCHLIESSLICH die zwei Felder "error"
@@ -80,6 +87,19 @@ func withRetryAfter(err *statusError, seconds int) error {
 //   - fileee.ErrNotFound                    → 404 "not_found"
 //   - fileee.ErrSessionExpired              → 502 "upstream_auth" (Reauth nach Session-Ablauf
 //     endgültig fehlgeschlagen, ADR-0005/fileee/auth.go)
+//   - context.DeadlineExceeded              → 504 "upstream_timeout" (Issue #44: von der
+//     UpstreamTimeout-Middleware gesetzte Request-Deadline lief ab, während der Handler auf eine
+//     Fileee-Antwort wartete — errors.Is findet das über die %w-Unwrap-Kette von go-fileees
+//     eigenen Fehler-Wraps UND über net/url.Error.Unwrap, ohne dass go-fileee dafür etwas
+//     Eigenes exportieren muss)
+//   - context.Canceled                      → 499 "request_canceled" (Review-Fund PR #45: der
+//     AUFRUFER von fileee-server hat die Verbindung abgebrochen, bevor der Handler fertig war —
+//     Go's http.Server bricht r.Context() in diesem Fall mit context.Canceled ab, NICHT
+//     context.DeadlineExceeded, unabhängig von FILEEE_UPSTREAM_TIMEOUT. Das ist kein Serverfehler
+//     und soll deshalb NICHT als "internal_error" in Fehler-Metriken/Logs landen. Status 499
+//     folgt der verbreiteten nginx-Konvention (kein offizieller IANA-Statuscode, daher kein
+//     benannter net/http-Konstantenname) — es gibt hier ohnehin niemanden mehr, der die Antwort
+//     empfängt; der Wert ist ausschließlich für Access-Log/Metriken relevant.
 //   - sonstiger *fileee.APIError            → dessen eigener HTTPStatus (Pass-Through), Code/
 //     Message der Lib (mit Fallback, falls die Lib defensiv leer geparst hat — siehe
 //     fileee/errors.go parseAPIError)
@@ -114,6 +134,10 @@ func mapError(err error) error {
 		return newStatusError(http.StatusNotFound, "not_found", "resource not found")
 	case errors.Is(err, fileee.ErrSessionExpired):
 		return newStatusError(http.StatusBadGateway, "upstream_auth", "fileee session expired and re-authentication failed")
+	case errors.Is(err, context.DeadlineExceeded):
+		return newStatusError(http.StatusGatewayTimeout, "upstream_timeout", "upstream request timed out")
+	case errors.Is(err, context.Canceled):
+		return newStatusError(clientClosedRequestStatus, "request_canceled", "client canceled the request")
 	case errors.As(err, &apiErr):
 		code := apiErr.Code
 		if code == "" {

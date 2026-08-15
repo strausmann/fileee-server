@@ -144,6 +144,7 @@ Feld wird an anderer Stelle direkt aus `os.Getenv` bezogen (einzige Ausnahme: de
 | `FILEEE_KEEPALIVE_INTERVAL` | Intervall des Session-Keepalive | `15m` | Nein | Nein |
 | `FILEEE_WAIT_TIMEOUT` | Default-Wartezeit von `POST /v1/processes/{id}/wait`, falls kein `?timeout=` mitgeschickt wird | `60s` | Nein | Nein |
 | `FILEEE_WAIT_MAX` | Obergrenze, auf die jedes angeforderte Wait-Timeout gedeckelt wird | `300s` | Nein | Nein |
+| `FILEEE_UPSTREAM_TIMEOUT` | Deadline für jeden Upstream-Roundtrip gegen Fileee — läuft sie ab, antwortet der Server mit `504 upstream_timeout` statt unbegrenzt zu hängen (siehe Abschnitt „Upstream-Timeout" unten). `0` deaktiviert die Deadline vollständig | `30s` | Nein | Nein |
 | `FILEEE_RATE_RPS` | Erlaubte Request-Rate/Sekunde gegen die Fileee-API (gilt für den authentifizierten Client UND den anonymen ShareClient) | `1` | Nein | Nein |
 | `FILEEE_RATE_BURST` | Burst-Größe des Token-Buckets | `3` | Nein | Nein |
 | `FILEEE_TRUSTED_PROXIES` | Kommagetrennte IPs/CIDRs vertrauenswürdiger Reverse-Proxies (Access-Log/Client-IP-Ermittlung) | leer | Nein | Nein |
@@ -156,8 +157,44 @@ Feld wird an anderer Stelle direkt aus `os.Getenv` bezogen (einzige Ausnahme: de
 | `FILEEE_USER_AGENT` | Überschreibt den User-Agent gegen Fileee | leer (Core-Lib-Default) | Nein | Nein |
 | `FILEEE_LOG_LEVEL` | Log-Level des strukturierten Loggers (`slog`) | `info` | Nein | Nein |
 
-**22 `FILEEE_*`-Variablen insgesamt** (3 davon Pflicht: `FILEEE_USERNAME`, `FILEEE_PASSWORD`,
+**23 `FILEEE_*`-Variablen insgesamt** (3 davon Pflicht: `FILEEE_USERNAME`, `FILEEE_PASSWORD`,
 `FILEEE_API_TOKEN`).
+
+### Upstream-Timeout
+
+Bis Issue [#44](https://github.com/strausmann/fileee-server/issues/44) hatte kein Upstream-Call
+gegen Fileee eine Deadline: ein „wedged" Fileee-Backend (Verbindung offen, nie eine Antwort) liess
+den betroffenen Handler unbegrenzt hängen — beobachtet nach ~223 authentifizierten Requests in
+Folge, während `/healthz` weiter `200` lieferte (Monitoring bemerkt es nicht, siehe
+`.claude/rules/service-verifikation.md` im homelab-management-Repo: ein Gesundheitspfad beweist
+nichts über den echten Endpunkt).
+
+`FILEEE_UPSTREAM_TIMEOUT` (Default `30s`) deckelt jeden Request-Context, bevor ein Handler
+`s.fc`/`s.sc` aufruft. Läuft die Deadline ab, meldet go-fileees Transport
+`context.DeadlineExceeded`, `mapError` übersetzt das auf `504 upstream_timeout` — statt eines
+unbegrenzten Hängers gibt es jetzt einen klaren, sofort sichtbaren Fehler.
+
+**Ausgenommen** von dieser Deadline sind Routen mit von Natur aus variabler/langer Laufzeit — aus
+demselben Grund, aus dem go-fileees eigener `http.Client` bewusst KEIN pauschales Timeout setzt
+(würde große Uploads/Exports mittendrin abschneiden):
+
+- `POST /v1/processes/{id}/wait` — blockiert absichtlich bis zu `FILEEE_WAIT_MAX` (bis zu 300s)
+- `POST /v1/documents` (Upload) und `POST /v1/documents/export-zip` (ZIP-Export)
+- `GET .../pdf` und `GET .../image` — Voll-PDFs und Seitenbilder, direkt UND über den anonymen
+  Share-Proxy (`/v1/share-objects/{token}/...`)
+- `GET /v1/documents` **im Suchmodus** (`?query=` gesetzt) — Volltextsuche macht
+  `Documents.Search` + einen `Documents.Get`-Call PRO TREFFER (N+1-Hydration, `limit`
+  caller-gesteuert ohne Obergrenze); die Deadline ist ein Wall-Clock-Budget für den gesamten
+  Request, nicht pro Einzel-Call — ohne diese Ausnahme würde jede nicht-triviale Suche mitten in
+  der Hydration mit `504` abbrechen. Der Page-Modus (kein `?query=`, EIN `Documents.Query`-Call)
+  bleibt der Deadline unterworfen.
+
+`FILEEE_UPSTREAM_TIMEOUT=0` deaktiviert die Deadline vollständig (kein Request wird gedeckelt).
+
+**Client-Abbruch:** Bricht der AUFRUFER von fileee-server die Verbindung ab (nicht die
+Upstream-Deadline), meldet Go `context.Canceled` statt `context.DeadlineExceeded` —
+`mapError` bildet das auf `499 request_canceled` ab, damit ein harmloser Client-Abbruch nicht als
+`internal_error` in Fehler-Metriken/Logs landet.
 
 **Secret-Backend / Infisical-Dual-Mode** (`cmd/fileee-server/secrets.go`, optional — nur relevant, wenn `SECRET_BACKEND=infisical` gesetzt ist oder eine Universal-Auth-Client-ID vorliegt):
 
@@ -374,6 +411,8 @@ die von der Lib exportierten Sentinel-Fehler bzw. Typen — **nie** über Fehler
 | `*fileee.BlockedError` | 503 Service Unavailable | `blocked` | Ja, `SecondsBlocked` aus dem Fehler |
 | `fileee.ErrNotFound` | 404 Not Found | `not_found` | – |
 | `fileee.ErrSessionExpired` | 502 Bad Gateway | `upstream_auth` | – (Re-Auth nach Session-Ablauf endgültig fehlgeschlagen) |
+| `context.DeadlineExceeded` | 504 Gateway Timeout | `upstream_timeout` | – (`FILEEE_UPSTREAM_TIMEOUT` abgelaufen, siehe Abschnitt „Upstream-Timeout") |
+| `context.Canceled` | 499 (nginx-Konvention, kein IANA-Code) | `request_canceled` | – (Aufrufer hat die Verbindung abgebrochen, kein Serverfehler) |
 | sonstiger `*fileee.APIError` | Pass-Through `apiErr.HTTPStatus` | `apiErr.Code` (Fallback `api_error`) | – |
 | alles andere | 500 Internal Server Error | `internal_error` | – |
 

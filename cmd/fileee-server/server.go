@@ -80,7 +80,14 @@ func (s *Server) Handler() http.Handler {
 	// ein Client beliebig viele Bytes senden, bevor ParseMultipartForm überhaupt zurückkehrt.
 	limited := uploadSizeLimit(s.cfg.MaxUploadBytes, http.Handler(mux))
 
-	inner := APITokenAuth(s.cfg.APIToken, isAuthExempt(s.cfg), limited)
+	// UpstreamTimeout (Issue #44) deckelt den Request-Context auf s.cfg.UpstreamTimeout, bevor
+	// ein Handler s.fc/s.sc aufruft — sitzt bewusst INNERHALB von APITokenAuth (nicht
+	// authentifizierte 401er brauchen keine Upstream-Deadline) und außerhalb von uploadSizeLimit
+	// (die Größenprüfung selbst macht keinen Upstream-Call). isUpstreamTimeoutExempt nimmt
+	// Routen mit von Natur aus variabler/langer Laufzeit aus (siehe dessen Doku).
+	timed := UpstreamTimeout(s.cfg.UpstreamTimeout, isUpstreamTimeoutExempt, limited)
+
+	inner := APITokenAuth(s.cfg.APIToken, isAuthExempt(s.cfg), timed)
 	return AccessLog(os.Stdout, s.cfg.TrustedProxies, s.cfg.ClientIPHeaders, inner)
 }
 
