@@ -1,3 +1,11 @@
+## [0.5.1](https://github.com/strausmann/fileee-server/compare/v0.5.0...v0.5.1) (2026-08-15)
+
+### Bug Fixes
+
+* **handlers:** dto-leak-guardrail aus echter huma-register-verdrahtung ableiten ([b83f797](https://github.com/strausmann/fileee-server/commit/b83f7970f1f78363fa37b951a630e606532ec905)), closes [#43](https://github.com/strausmann/fileee-server/issues/43)
+* **server:** suchmodus-N+1 von upstream-timeout ausnehmen, client-abbruch als 499 mappen ([5ab9ad3](https://github.com/strausmann/fileee-server/commit/5ab9ad3ef42545ceb872157aa0cdb2671abc36f3)), closes [#44](https://github.com/strausmann/fileee-server/issues/44)
+* **server:** upstream-timeout gegen haengende fileee-anfragen ergaenzt ([bcfbdd1](https://github.com/strausmann/fileee-server/commit/bcfbdd1887e42a66ad38d040c36faf8a41623e1a)), closes [#44](https://github.com/strausmann/fileee-server/issues/44)
+
 ## [0.5.0](https://github.com/strausmann/fileee-server/compare/v0.4.1...v0.5.0) (2026-08-14)
 
 ### Features
