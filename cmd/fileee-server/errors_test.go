@@ -163,6 +163,38 @@ func TestMapError_DeadlineExceeded_WrappedLikeRealClient(t *testing.T) {
 	}
 }
 
+// TestMapError_Canceled_Direct belegt den Review-Fund zu PR #45: ein unverpackter
+// context.Canceled (Client hat die Verbindung abgebrochen) muss auf 499 "request_canceled"
+// abgebildet werden — NICHT auf 500 "internal_error" (das würde einen harmlosen Client-Abbruch
+// als Serverfehler in Metriken/Logs zählen).
+func TestMapError_Canceled_Direct(t *testing.T) {
+	got := mapError(context.Canceled)
+	if status := wantStatus(t, got); status != clientClosedRequestStatus {
+		t.Errorf("status = %d, want %d", status, clientClosedRequestStatus)
+	}
+	if code := wantBody(t, got).ErrorCode; code != "request_canceled" {
+		t.Errorf("code = %q, want %q", code, "request_canceled")
+	}
+}
+
+// TestMapError_Canceled_WrappedLikeRealClient bildet nach, wie ein Client-Abbruch in der Praxis
+// tatsächlich bei mapError ankommt — analog TestMapError_DeadlineExceeded_WrappedLikeRealClient,
+// aber mit context.Canceled statt context.DeadlineExceeded als Ursache (Go's http.Server bricht
+// r.Context() bei getrennter Client-Verbindung mit Canceled ab, nicht mit DeadlineExceeded,
+// unabhängig davon, ob FILEEE_UPSTREAM_TIMEOUT überhaupt gesetzt ist).
+func TestMapError_Canceled_WrappedLikeRealClient(t *testing.T) {
+	urlErr := &url.Error{Op: "Get", URL: "https://my.fileee.com/api/document-types/rest/query", Err: context.Canceled}
+	wrapped := fmt.Errorf("fileee: get %s: %w", "/api/document-types/rest/query", urlErr)
+
+	got := mapError(wrapped)
+	if status := wantStatus(t, got); status != clientClosedRequestStatus {
+		t.Errorf("status = %d, want %d", status, clientClosedRequestStatus)
+	}
+	if code := wantBody(t, got).ErrorCode; code != "request_canceled" {
+		t.Errorf("code = %q, want %q", code, "request_canceled")
+	}
+}
+
 // TestMapError_GenericAPIError_PassThroughStatus belegt, dass ein *fileee.APIError, der keinem
 // der bekannten Sentinel-Fälle entspricht, mit SEINEM EIGENEN HTTPStatus durchgereicht wird (Spec
 // §12: "sonstiger APIError → dessen HTTPStatus").

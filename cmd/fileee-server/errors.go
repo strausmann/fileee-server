@@ -11,6 +11,12 @@ import (
 	"github.com/strausmann/go-fileee/fileee"
 )
 
+// clientClosedRequestStatus (499) markiert einen vom AUFRUFER abgebrochenen Request
+// (context.Canceled, siehe mapError) — die verbreitete nginx-Konvention für "der Client ist weg,
+// bevor eine Antwort feststand". Kein offizieller IANA-HTTP-Statuscode, daher exportiert
+// net/http keine passende Konstante (anders als z. B. http.StatusGatewayTimeout).
+const clientClosedRequestStatus = 499
+
 // statusError ist der eigene Huma-Fehlertyp von fileee-server. Er erfüllt huma.StatusError
 // (GetStatus/Error), liefert im JSON-Response-Body aber AUSSCHLIESSLICH die zwei Felder "error"
 // (menschenlesbare Meldung) und "code" (stabiler Kurzcode) — bewusst NICHT Humas
@@ -86,6 +92,14 @@ func withRetryAfter(err *statusError, seconds int) error {
 //     Fileee-Antwort wartete — errors.Is findet das über die %w-Unwrap-Kette von go-fileees
 //     eigenen Fehler-Wraps UND über net/url.Error.Unwrap, ohne dass go-fileee dafür etwas
 //     Eigenes exportieren muss)
+//   - context.Canceled                      → 499 "request_canceled" (Review-Fund PR #45: der
+//     AUFRUFER von fileee-server hat die Verbindung abgebrochen, bevor der Handler fertig war —
+//     Go's http.Server bricht r.Context() in diesem Fall mit context.Canceled ab, NICHT
+//     context.DeadlineExceeded, unabhängig von FILEEE_UPSTREAM_TIMEOUT. Das ist kein Serverfehler
+//     und soll deshalb NICHT als "internal_error" in Fehler-Metriken/Logs landen. Status 499
+//     folgt der verbreiteten nginx-Konvention (kein offizieller IANA-Statuscode, daher kein
+//     benannter net/http-Konstantenname) — es gibt hier ohnehin niemanden mehr, der die Antwort
+//     empfängt; der Wert ist ausschließlich für Access-Log/Metriken relevant.
 //   - sonstiger *fileee.APIError            → dessen eigener HTTPStatus (Pass-Through), Code/
 //     Message der Lib (mit Fallback, falls die Lib defensiv leer geparst hat — siehe
 //     fileee/errors.go parseAPIError)
@@ -122,6 +136,8 @@ func mapError(err error) error {
 		return newStatusError(http.StatusBadGateway, "upstream_auth", "fileee session expired and re-authentication failed")
 	case errors.Is(err, context.DeadlineExceeded):
 		return newStatusError(http.StatusGatewayTimeout, "upstream_timeout", "upstream request timed out")
+	case errors.Is(err, context.Canceled):
+		return newStatusError(clientClosedRequestStatus, "request_canceled", "client canceled the request")
 	case errors.As(err, &apiErr):
 		code := apiErr.Code
 		if code == "" {

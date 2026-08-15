@@ -182,8 +182,19 @@ demselben Grund, aus dem go-fileees eigener `http.Client` bewusst KEIN pauschale
 - `POST /v1/documents` (Upload) und `POST /v1/documents/export-zip` (ZIP-Export)
 - `GET .../pdf` und `GET .../image` — Voll-PDFs und Seitenbilder, direkt UND über den anonymen
   Share-Proxy (`/v1/share-objects/{token}/...`)
+- `GET /v1/documents` **im Suchmodus** (`?query=` gesetzt) — Volltextsuche macht
+  `Documents.Search` + einen `Documents.Get`-Call PRO TREFFER (N+1-Hydration, `limit`
+  caller-gesteuert ohne Obergrenze); die Deadline ist ein Wall-Clock-Budget für den gesamten
+  Request, nicht pro Einzel-Call — ohne diese Ausnahme würde jede nicht-triviale Suche mitten in
+  der Hydration mit `504` abbrechen. Der Page-Modus (kein `?query=`, EIN `Documents.Query`-Call)
+  bleibt der Deadline unterworfen.
 
 `FILEEE_UPSTREAM_TIMEOUT=0` deaktiviert die Deadline vollständig (kein Request wird gedeckelt).
+
+**Client-Abbruch:** Bricht der AUFRUFER von fileee-server die Verbindung ab (nicht die
+Upstream-Deadline), meldet Go `context.Canceled` statt `context.DeadlineExceeded` —
+`mapError` bildet das auf `499 request_canceled` ab, damit ein harmloser Client-Abbruch nicht als
+`internal_error` in Fehler-Metriken/Logs landet.
 
 **Secret-Backend / Infisical-Dual-Mode** (`cmd/fileee-server/secrets.go`, optional — nur relevant, wenn `SECRET_BACKEND=infisical` gesetzt ist oder eine Universal-Auth-Client-ID vorliegt):
 
@@ -401,6 +412,7 @@ die von der Lib exportierten Sentinel-Fehler bzw. Typen — **nie** über Fehler
 | `fileee.ErrNotFound` | 404 Not Found | `not_found` | – |
 | `fileee.ErrSessionExpired` | 502 Bad Gateway | `upstream_auth` | – (Re-Auth nach Session-Ablauf endgültig fehlgeschlagen) |
 | `context.DeadlineExceeded` | 504 Gateway Timeout | `upstream_timeout` | – (`FILEEE_UPSTREAM_TIMEOUT` abgelaufen, siehe Abschnitt „Upstream-Timeout") |
+| `context.Canceled` | 499 (nginx-Konvention, kein IANA-Code) | `request_canceled` | – (Aufrufer hat die Verbindung abgebrochen, kein Serverfehler) |
 | sonstiger `*fileee.APIError` | Pass-Through `apiErr.HTTPStatus` | `apiErr.Code` (Fallback `api_error`) | – |
 | alles andere | 500 Internal Server Error | `internal_error` | – |
 

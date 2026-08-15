@@ -44,6 +44,14 @@ func UpstreamTimeout(timeout time.Duration, exempt func(r *http.Request) bool, n
 //   - POST /v1/documents/export-zip               — ZIP-Export (exakter Pfad)
 //   - GET  .../pdf                                 — Voll-PDF, direkt UND Share-Proxy
 //   - GET  .../image                               — Seitenbild, direkt UND Share-Proxy
+//   - GET  /v1/documents mit gesetztem ?query=     — Suchmodus: Documents.Search + EIN
+//     Documents.Get PRO TREFFER (N+1-Hydration, handleListDocuments, handlers_documents.go),
+//     Limit caller-gesteuert ohne Obergrenze. Review-Fund zu PR #45: die Middleware ist ein
+//     Wall-Clock-Budget für den GESAMTEN Request, nicht pro Einzel-Call — ohne diese Ausnahme
+//     würde jede nicht-triviale Suche mitten in der Hydration 504en (vorher langsam, aber
+//     erfolgreich). Ein LEERER query-Parameter (Key vorhanden, Wert "") aktiviert NICHT den
+//     Suchmodus (handleListDocuments prüft `in.Query != ""`) und bleibt deshalb NICHT
+//     ausgenommen — der Page-Zweig (Documents.Query, EIN Call) braucht die Ausnahme nicht.
 //
 // Alle übrigen Routen (inkl. der schlanken JSON-GETs/-POSTs, deren unbegrenztes Hängen Issue #44
 // überhaupt erst auslöste) bleiben der Deadline unterworfen.
@@ -59,6 +67,9 @@ func isUpstreamTimeoutExempt(r *http.Request) bool {
 		}
 	case http.MethodGet:
 		if strings.HasSuffix(path, "/pdf") || strings.HasSuffix(path, "/image") {
+			return true
+		}
+		if path == "/v1/documents" && r.URL.Query().Get("query") != "" {
 			return true
 		}
 	}

@@ -144,12 +144,87 @@ func TestUpstreamTimeout_WaitProcessExemptFromShortDeadline(t *testing.T) {
 	}
 }
 
+// TestUpstreamTimeout_SearchHydrationExempt ist der HIGH-Review-Fund zu Issue #44 (Lens-Review
+// von PR #45): GET /v1/documents im SUCHMODUS (?query= gesetzt) macht Documents.Search + EINEN
+// Documents.Get-Call PRO TREFFER (N+1-Hydration, handleListDocuments, handlers_documents.go) —
+// Limit ist caller-gesteuert ohne Obergrenze. cfg.UpstreamTimeout ist als Middleware ein
+// Wall-Clock-Budget für den GESAMTEN Request, nicht pro Einzel-Call — ohne Ausnahme würde jede
+// nicht-triviale Suche mitten in der Hydration mit 504 abbrechen, obwohl sie vor dieser Änderung
+// (langsam, aber unbegrenzt) erfolgreich durchlief. Der Fix (isUpstreamTimeoutExempt) nimmt
+// GET /v1/documents MIT gesetztem query-Parameter aus derselben Begründung aus wie wait-process/
+// upload/export: von Natur aus variable, potenziell lange Laufzeit. Der per-Call
+// ResponseHeaderTimeout=30s von go-fileee (defaultTransport, client.go) schützt WEITERHIN jeden
+// einzelnen Search-/Get-Call gegen einen echten Wedge — nur das Wall-Clock-Budget über die ganze
+// Schleife entfällt.
+//
+// Simuliert 5 Treffer mit je 40ms Verzögerung pro Get-Hydration-Call (200ms Gesamtdauer) gegen
+// eine 80ms-UpstreamTimeout — ohne die Ausnahme würde das zuverlässig 504en.
+func TestUpstreamTimeout_SearchHydrationExempt(t *testing.T) {
+	routes := map[string]mockRoute{
+		"POST /api/documents/rest/query": {
+			Status: http.StatusOK,
+			Body:   []byte(`{"rows":["doc-1","doc-2","doc-3","doc-4","doc-5"],"totalRows":5}`),
+		},
+		// Wildcard-Pattern trifft JEDEN der 5 Get-Hydration-Calls einzeln — jeder bekommt seine
+		// eigene 40ms-Verzögerung (siehe mockRoute.Delay-Doku), kumuliert 200ms > die 80ms
+		// UpstreamTimeout unten.
+		"GET /api/documents/rest/{id}": {
+			Delay:  40 * time.Millisecond,
+			Status: http.StatusOK,
+			Body:   []byte(`{"id":"doc-x","version":1,"status":"DONE"}`),
+		},
+	}
+	// newTestServerWithConfig/newTestFileeeClient (handlers_test.go) verdrahten fc bewusst OHNE
+	// fileee.WithRateLimit — go-fileees eigener NewClient-Default greift dann (rps=1, burst=3,
+	// client.go). Bei EnsureSession-vor-jedem-Call (Config.WithSessionFreshness bleibt hier
+	// unangetastet, Default 0 = jeder Call verifiziert neu) verbraucht dieser Test 1 Search + 5
+	// Get-Hydration-Calls × 2 Tokens (EnsureSession + eigentlicher Call) = 12 Tokens — weit über
+	// dem Burst von 3, macht den Test unnötig langsam (real gemessen: ~9s statt ~200ms) OHNE
+	// irgendetwas über die UpstreamTimeout-Exemption zu beweisen (reines Test-Rauschen von einem
+	// UNRELATED Rate-Limiter). newTestServerWithRateUnlimitedClient baut deshalb — exakt wie
+	// bereits in handlers_documents_pagination_test.go/watch_test.go etabliert (dortiger
+	// Kommentar: "hebt den Default-Token-Bucket auf") — einen eigenen fc MIT
+	// fileee.WithRateLimit(1000, 1000).
+	cfg := Config{UpstreamTimeout: 80 * time.Millisecond}
+	_, ts := newTestServerWithRateUnlimitedClient(t, cfg, routes)
+
+	req := newAuthedRequest(t, http.MethodGet, ts.URL+"/v1/documents?query=rechnung", nil)
+
+	start := time.Now()
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET /v1/documents?query=rechnung: %v", err)
+	}
+	defer resp.Body.Close()
+	elapsed := time.Since(start)
+
+	body, readErr := io.ReadAll(resp.Body)
+	if readErr != nil {
+		t.Fatalf("Body lesen: %v", readErr)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (Suchmodus muss von der 80ms-UpstreamTimeout ausgenommen sein), body=%s", resp.StatusCode, body)
+	}
+	if elapsed < 180*time.Millisecond {
+		t.Fatalf("elapsed = %v, want >= ~200ms (Beleg, dass alle 5 Hydration-Calls tatsächlich liefen und die 80ms-Deadline NICHT griff)", elapsed)
+	}
+
+	var decoded documentListBody
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		t.Fatalf("Body als documentListBody dekodieren: %v", err)
+	}
+	if len(decoded.Items) != 5 {
+		t.Fatalf("Items = %d, want 5 (alle Treffer hydriert)", len(decoded.Items))
+	}
+}
+
 // TestIsUpstreamTimeoutExempt prüft die Ausnahmeliste der Middleware direkt gegen echte
-// Methode/Pfad-Kombinationen — ohne den vollen Server-Umweg. Ausgenommen sind ausschließlich
-// Routen mit von Natur aus variabler/langer Laufzeit (Design-Analog zu go-fileees eigenem
-// Verzicht auf ein pauschales http.Client.Timeout, siehe Config.UpstreamTimeout-Doku): der
-// blockierende Wait-Endpunkt, Upload, ZIP-Export sowie binäre PDF-/Bild-Downloads (direkt und
-// über den anonymen Share-Proxy).
+// Methode/Pfad-Kombinationen (inkl. Query-String, wo relevant) — ohne den vollen Server-Umweg.
+// Ausgenommen sind ausschließlich Routen mit von Natur aus variabler/langer Laufzeit
+// (Design-Analog zu go-fileees eigenem Verzicht auf ein pauschales http.Client.Timeout, siehe
+// Config.UpstreamTimeout-Doku): der blockierende Wait-Endpunkt, Upload, ZIP-Export, binäre
+// PDF-/Bild-Downloads (direkt und über den anonymen Share-Proxy) sowie GET /v1/documents im
+// Suchmodus (N+1-Hydration, siehe TestUpstreamTimeout_SearchHydrationExempt).
 func TestIsUpstreamTimeoutExempt(t *testing.T) {
 	cases := []struct {
 		method string
@@ -163,9 +238,14 @@ func TestIsUpstreamTimeoutExempt(t *testing.T) {
 		{http.MethodGet, "/v1/pages/page-1/image", true},
 		{http.MethodGet, "/v1/share-objects/tok/documents/doc-1/pdf", true},
 		{http.MethodGet, "/v1/share-objects/tok/pages/page-1/image", true},
+		{http.MethodGet, "/v1/documents?query=rechnung", true},
 
 		{http.MethodGet, "/v1/document-types", false},
 		{http.MethodGet, "/v1/documents", false},
+		// Leerer query-Parameter (Key vorhanden, Wert leer) aktiviert NICHT den Suchmodus —
+		// handleListDocuments prüft `in.Query != ""` (handlers_documents.go), der Page-Zweig
+		// läuft, also keine Ausnahme.
+		{http.MethodGet, "/v1/documents?query=", false},
 		{http.MethodGet, "/v1/documents/doc-1", false},
 		{http.MethodGet, "/v1/processes/proc-1", false},
 		{http.MethodPost, "/v1/share", false},

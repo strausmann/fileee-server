@@ -46,6 +46,16 @@ Vollständiger Issue-Text: [#44](https://github.com/strausmann/fileee-server/iss
    - `POST /v1/documents` (Upload) und `POST /v1/documents/export-zip` (ZIP-Export).
    - `GET .../pdf` und `GET .../image` — Voll-PDFs und Seitenbilder, direkt UND über den anonymen
      Share-Proxy (`/v1/share-objects/{token}/...`).
+   - `GET /v1/documents` im Suchmodus (`?query=` gesetzt) — **Lens-Review-Fund (PR #45,
+     HIGH):** `handleListDocuments` macht im Suchmodus `Documents.Search` + EINEN
+     `Documents.Get`-Call PRO TREFFER (N+1-Hydration, `limit` caller-gesteuert ohne
+     Obergrenze). Die Middleware ist ein Wall-Clock-Budget für den GESAMTEN Request, nicht pro
+     Einzel-Call — ohne diese Ausnahme hätte jede nicht-triviale Suche mitten in der Hydration
+     504en können (Regression gegenüber vorher: langsam, aber erfolgreich). Der Page-Modus (kein
+     `?query=`, EIN `Documents.Query`-Call) braucht die Ausnahme nicht und bleibt der Deadline
+     unterworfen — der per-Call `ResponseHeaderTimeout=30s` von go-fileee schützt weiterhin jeden
+     einzelnen Search-/Get-Call gegen einen echten Wedge, nur das Wall-Clock-Budget über die
+     ganze Schleife entfällt.
 
    Alle übrigen Routen (insbesondere die schlanken JSON-GETs/-POSTs, deren Hängen Issue #44
    überhaupt erst auslöste) unterliegen der Deadline.
@@ -63,6 +73,13 @@ Vollständiger Issue-Text: [#44](https://github.com/strausmann/fileee-server/iss
    `%w`-Unwrap-Kette von go-fileees eigenen Fehler-Wraps UND über `net/url.Error.Unwrap`, ohne
    dass go-fileee dafür etwas Eigenes exportieren muss.
 
+5. **`context.Canceled` → HTTP 499 `request_canceled`** (Lens-Review-Fund, LOW): bricht der
+   AUFRUFER von fileee-server die Verbindung ab, meldet Go `context.Canceled` statt
+   `context.DeadlineExceeded` — unabhängig davon, ob `FILEEE_UPSTREAM_TIMEOUT` überhaupt greift.
+   Ohne diese Unterscheidung wäre ein harmloser Client-Abbruch als `internal_error` (500) in
+   Fehler-Metriken/Logs gelandet. 499 folgt der verbreiteten nginx-Konvention; es gibt keinen
+   offiziellen IANA-Code dafür.
+
 ## Konsequenzen
 
 **Positiv:**
@@ -75,6 +92,11 @@ Vollständiger Issue-Text: [#44](https://github.com/strausmann/fileee-server/iss
 - Bestehende Tests und Deployments ohne `LoadConfig` (z. B. `Config{}`-Literale) sind durch den
   Zero-heißt-aus-Default nicht betroffen — keine stille Verhaltensänderung für Code, der das Feld
   nicht kennt.
+- Die N+1-Suchhydration (`GET /v1/documents?query=`) bleibt vollständig nutzbar, egal wie viele
+  Treffer eine Suche liefert — die Ausnahme wurde VOR dem Merge gefunden (Lens-Review), nicht erst
+  in Produktion.
+- Ein harmloser Client-Abbruch verzerrt keine Fehlerraten-Metriken mehr (`499`
+  `request_canceled` statt `500` `internal_error`).
 
 **Negativ / bewusst in Kauf genommen:**
 - Die Ausnahmeliste ist eine **Pfad-/Methoden-Matching-Middleware** (`isUpstreamTimeoutExempt`),

@@ -59,6 +59,15 @@ type mockRoute struct {
 	// um zu belegen, dass eine DEAKTIVIERTE Deadline (UpstreamTimeout=0) einen Upstream, der
 	// lediglich langsam (nicht unbegrenzt) antwortet, nicht vorzeitig abschneidet.
 	DelayUntil <-chan struct{}
+	// Delay verzögert die Fixture-Antwort um eine FESTE Dauer (context-aware: bricht früher ab,
+	// wenn r.Context() vorher fertig ist) — anders als DelayUntil (ein einzelnes, extern
+	// kontrolliertes Gate) gebraucht für Routen, die MEHRFACH mit demselben Muster getroffen
+	// werden (z. B. ein Wildcard-Pattern "GET /api/documents/rest/{id}", das JEDEN
+	// Get-Hydration-Call einer Suche trifft): jeder Treffer bekommt seine eigene, unabhängige
+	// Verzögerung, kumuliert über N sequentielle Aufrufe also N*Delay Wall-Clock-Zeit — genau das
+	// Szenario, das eine Wall-Clock-Deadline über die GESAMTE N+1-Schleife (statt pro Einzel-Call)
+	// treffen würde (Issue #44 Review-Finding, siehe TestUpstreamTimeout_SearchHydrationExempt).
+	Delay time.Duration
 }
 
 // newTestFileeeClient baut EINEN gemeinsamen httptest-Mock-Server und darauf verdrahtet sowohl
@@ -89,7 +98,20 @@ type mockRoute struct {
 // Transport-Fehler durchläuft). sc zeigt mit BEIDEN Basis-URLs (baseURL UND staticBaseURL) auf
 // DENSELBEN mockSrv — analog zu fileee.shareMockServer (fileee/shareclient_test.go), das ebenfalls
 // einen einzigen Mock-Host für API- und Static-Pfad verwendet.
-func newTestFileeeClient(t *testing.T, routes map[string]mockRoute) (*fileee.Client, *fileee.ShareClient) {
+//
+// fcOpts hängt zusätzliche fileee.Option NACH den festen Basis-Optionen an fc an — optional,
+// leer bei allen bestehenden Aufrufstellen (unverändertes Verhalten). Gebraucht von Tests mit
+// MEHREREN Upstream-Calls (z. B. TestUpstreamTimeout_SearchHydrationExempt,
+// upstream_timeout_test.go): fc bekommt HIER standardmäßig KEIN fileee.WithRateLimit — anders
+// als sc unten (das eine feste WithRateLimit(1000,1000) hat) — go-fileees NewClient-Default
+// (rps=1, burst=3, client.go) greift dann für fc. Bei EnsureSession-vor-jedem-Call (Default
+// WithSessionFreshness=0) verbraucht ein Search+N-Hydration-Aufruf 2 Tokens pro Call
+// (EnsureSession + eigentlicher Call) — das lässt einen Multi-Call-Test schnell auf mehrere
+// echte Sekunden Laufzeit aufblähen, ohne dass das irgendetwas mit dem eigentlich getesteten
+// Verhalten zu tun hat (derselbe Fallstrick bereits gelöst in
+// handlers_documents_pagination_test.go/watch_test.go — dort mit einem komplett eigenen,
+// dupliziertem Mock-Aufbau; fcOpts vermeidet hier die Duplikation).
+func newTestFileeeClient(t *testing.T, routes map[string]mockRoute, fcOpts ...fileee.Option) (*fileee.Client, *fileee.ShareClient) {
 	t.Helper()
 
 	mux := http.NewServeMux()
@@ -123,6 +145,15 @@ func newTestFileeeClient(t *testing.T, routes map[string]mockRoute) (*fileee.Cli
 			if route.DelayUntil != nil {
 				select {
 				case <-route.DelayUntil:
+				case <-r.Context().Done():
+					return
+				}
+			}
+			if route.Delay > 0 {
+				timer := time.NewTimer(route.Delay)
+				defer timer.Stop()
+				select {
+				case <-timer.C:
 				case <-r.Context().Done():
 					return
 				}
@@ -165,7 +196,8 @@ func newTestFileeeClient(t *testing.T, routes map[string]mockRoute) (*fileee.Cli
 
 	creds := fileee.Credentials{Username: "test@example.invalid", Password: "test-pw"}
 
-	fc, err := fileee.NewClient(creds, fileee.WithBaseURL(mockSrv.URL), fileee.WithSessionStore(store))
+	opts := append([]fileee.Option{fileee.WithBaseURL(mockSrv.URL), fileee.WithSessionStore(store)}, fcOpts...)
+	fc, err := fileee.NewClient(creds, opts...)
 	if err != nil {
 		t.Fatalf("fileee.NewClient: %v", err)
 	}
@@ -231,6 +263,27 @@ func newTestServerWithConfigAndLog(t *testing.T, cfg Config, routes map[string]m
 
 	fc, sc := newTestFileeeClient(t, routes)
 
+	s := NewServer(cfg, fc, sc, log)
+	ts := httptest.NewServer(s.Handler())
+	t.Cleanup(ts.Close)
+
+	return s, ts
+}
+
+// newTestServerWithRateUnlimitedClient ist wie newTestServerWithConfig, gibt fc aber zusätzlich
+// fileee.WithRateLimit(1000, 1000) mit (siehe fcOpts-Doku an newTestFileeeClient) — für Tests,
+// die MEHRERE Upstream-Calls in einem Request auslösen (N+1-Hydration, Pagination) und dabei
+// NICHT durch den unrelated Default-Rate-Limiter (rps=1, burst=3) ausgebremst werden sollen.
+func newTestServerWithRateUnlimitedClient(t *testing.T, cfg Config, routes map[string]mockRoute) (*Server, *httptest.Server) {
+	t.Helper()
+
+	cfg.APIToken = testAPIToken
+	cfg.DocsPublic = true
+	cfg.ClientIPHeaders = defaultClientIPHeaders
+
+	fc, sc := newTestFileeeClient(t, routes, fileee.WithRateLimit(1000, 1000))
+
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	s := NewServer(cfg, fc, sc, log)
 	ts := httptest.NewServer(s.Handler())
 	t.Cleanup(ts.Close)
