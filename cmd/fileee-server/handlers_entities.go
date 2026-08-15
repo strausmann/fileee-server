@@ -46,7 +46,7 @@ type entityListOutput[T any] struct {
 // (fileee/service.go ReadService[T].Query) — query wird deshalb direkt als Methodenwert übergeben
 // (z.B. s.fc.Tags.Query), ganz ohne Wrapper-Closure.
 func registerEntityListRoute[T any](api huma.API, operationID, path string, query func(ctx context.Context, opts fileee.QueryOptions) (*fileee.QueryResult[T], error)) {
-	huma.Register(api, huma.Operation{
+	registerOperation(api, huma.Operation{
 		OperationID: operationID,
 		Method:      http.MethodGet,
 		Path:        path,
@@ -204,19 +204,19 @@ type listBoxesOutput struct {
 // übersetzen Fehler ausschließlich über mapError.
 func (s *Server) registerEntityRoutes(api huma.API) {
 	registerEntityListRoute(api, "list-tags", "/v1/tags", s.fc.Tags.Query)
-	huma.Register(api, huma.Operation{
+	registerOperation(api, huma.Operation{
 		OperationID: "list-companies",
 		Method:      http.MethodGet,
 		Path:        "/v1/companies",
 	}, s.handleListCompanies)
-	huma.Register(api, huma.Operation{
+	registerOperation(api, huma.Operation{
 		OperationID: "get-company",
 		Method:      http.MethodGet,
 		Path:        "/v1/companies/{id}",
 		Summary:     "Einzelne Firma laden",
 	}, s.handleGetCompany)
 	registerEntityListRoute(api, "list-contacts", "/v1/contacts", s.fc.Contacts.Query)
-	huma.Register(api, huma.Operation{
+	registerOperation(api, huma.Operation{
 		OperationID: "get-contact",
 		Method:      http.MethodGet,
 		Path:        "/v1/contacts/{id}",
@@ -226,33 +226,33 @@ func (s *Server) registerEntityRoutes(api huma.API) {
 	registerEntityListRoute(api, "list-document-type-schemes", "/v1/document-type-schemes", s.fc.DocumentTypeSchemes.Query)
 	registerEntityListRoute(api, "list-reminders", "/v1/reminders", s.fc.Reminders.Query)
 
-	huma.Register(api, huma.Operation{
+	registerOperation(api, huma.Operation{
 		OperationID: "list-boxes",
 		Method:      http.MethodGet,
 		Path:        "/v1/boxes",
 	}, s.handleListBoxes)
 
-	huma.Register(api, huma.Operation{
+	registerOperation(api, huma.Operation{
 		OperationID: "get-box",
 		Method:      http.MethodGet,
 		Path:        "/v1/boxes/{id}",
 	}, s.handleGetBox)
 
-	huma.Register(api, huma.Operation{
+	registerOperation(api, huma.Operation{
 		OperationID: "add-box-document",
 		Method:      http.MethodPost,
 		Path:        "/v1/boxes/{boxId}/documents/{docId}",
 		Summary:     "Dokument in eine FileeeBox einheften",
 	}, s.handleAddBoxDocument)
 
-	huma.Register(api, huma.Operation{
+	registerOperation(api, huma.Operation{
 		OperationID: "remove-box-document",
 		Method:      http.MethodDelete,
 		Path:        "/v1/boxes/{boxId}/documents/{docId}",
 		Summary:     "Dokument aus einer FileeeBox aushängen (kein Destruktiv-Gate, Ausheften ≠ Löschen)",
 	}, s.handleRemoveBoxDocument)
 
-	huma.Register(api, huma.Operation{
+	registerOperation(api, huma.Operation{
 		OperationID: "create-reminder",
 		Method:      http.MethodPost,
 		Path:        "/v1/reminders",
@@ -263,7 +263,7 @@ func (s *Server) registerEntityRoutes(api huma.API) {
 		SkipValidateBody: true,
 	}, s.handleCreateReminder)
 
-	huma.Register(api, huma.Operation{
+	registerOperation(api, huma.Operation{
 		OperationID:      "update-reminder",
 		Method:           http.MethodPut,
 		Path:             "/v1/reminders/{id}",
@@ -271,7 +271,7 @@ func (s *Server) registerEntityRoutes(api huma.API) {
 		SkipValidateBody: true,
 	}, s.handleUpdateReminder)
 
-	huma.Register(api, huma.Operation{
+	registerOperation(api, huma.Operation{
 		OperationID:      "create-contact",
 		Method:           http.MethodPost,
 		Path:             "/v1/contacts",
@@ -279,7 +279,7 @@ func (s *Server) registerEntityRoutes(api huma.API) {
 		SkipValidateBody: true,
 	}, s.handleCreateContact)
 
-	huma.Register(api, huma.Operation{
+	registerOperation(api, huma.Operation{
 		OperationID:      "update-contact",
 		Method:           http.MethodPut,
 		Path:             "/v1/contacts/{id}",

@@ -15,7 +15,7 @@ import (
 // Share-Link) rein, ein einheitliches ResolvedDocument raus. handleResolve ist der einzige
 // Handler, der fileee.ParseDocumentLink aufruft — jede andere Route kennt Linkarten nicht.
 func (s *Server) registerResolveRoute(api huma.API) {
-	huma.Register(api, huma.Operation{
+	registerOperation(api, huma.Operation{
 		OperationID: "resolve-document-link",
 		Method:      http.MethodPost,
 		Path:        "/v1/resolve",

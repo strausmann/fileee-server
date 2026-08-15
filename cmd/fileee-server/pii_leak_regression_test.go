@@ -163,9 +163,24 @@ func TestListCompanies_NeverLeaksAttributes(t *testing.T) {
 // TestGetCompany_NeverLeaksAttributes is the single-lookup counterpart to
 // TestListCompanies_NeverLeaksAttributes: GET /v1/companies/{id} must project onto
 // companyResponseBody exactly like the list endpoint (same fileee.Company.MarshalJSON risk, see
-// registeredResponseBodyTypes doc comment in response_body_safety_test.go) — proven here with the
-// same fullAttributesCompanyJSON fixture, checked against the WHOLE response body (not just
+// registeredResponseBodyTypesFromRealServer doc comment in response_body_safety_test.go) — checked
+// here with the same fullAttributesCompanyJSON fixture, against the WHOLE response body (not just
 // Items[].attributes, since a single-lookup response has no "items" wrapper).
+//
+// What this test DOES and does NOT prove (Issue #43): it proves the CURRENT implementation
+// (projecting onto companyResponseBody) produces a clean response for this exact fixture. It does
+// NOT, by itself, guard against a FUTURE regression that inlines fileee.Company as this route's
+// TOP-LEVEL response body: huma@v2.39.1's SchemaLinkTransformer (transforms.go) clones the
+// top-level body type via reflect.StructOf to inject "$schema" — that clone has none of the
+// original's methods, so fileee.Company.MarshalJSON would simply never fire, and this HTTP-level
+// test would stay green even with the leak present (verified empirically: patching
+// handleGetCompany to return *c directly leaves this test passing while
+// TestNoFileeeMarshalerTypeInAnyResponseBody, response_body_safety_test.go, correctly goes red —
+// that structural, registration-derived guardrail is what actually closes this gap, not this
+// test). Nested types (e.g. documentListBody.Items []documentResponseBody) are NOT affected by
+// this masking — the clone is only one level deep — so TestListCompanies_NeverLeaksAttributes and
+// TestListDocuments_NeverLeaksAttributes_EvenWithFullUpstreamData above do not carry the same
+// caveat.
 func TestGetCompany_NeverLeaksAttributes(t *testing.T) {
 	routes := map[string]mockRoute{
 		"GET /api/companies/rest/company-1": {

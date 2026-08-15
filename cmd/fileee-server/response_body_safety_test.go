@@ -10,12 +10,11 @@ import (
 	"github.com/strausmann/go-fileee/fileee"
 )
 
-// registeredResponseBodyTypes is the complete list of every "Body" field type currently used as a
-// Huma operation response body across this server (streaming responses — *huma.StreamResponse for
-// PDF/image downloads — carry no go-fileee-typed body and are excluded; request-only body types,
-// e.g. updateDocumentInput.Body fileee.Document, are excluded too — this guardrail is about what
-// we SEND, not what we accept). MUST be updated whenever a new route with a new response body
-// type is registered — see TestNoFileeeMarshalerTypeInAnyResponseBody below.
+// registeredResponseBodyTypesFromRealServer builds a throwaway *Server with AllowDestructive true
+// (so the three conditionally-registered Hard-DELETE routes are captured too) and returns the
+// list of response body types that were ACTUALLY passed through registerOperation
+// (operation_registry.go) while building it — see TestNoFileeeMarshalerTypeInAnyResponseBody
+// below.
 //
 // # Why this test exists
 //
@@ -36,8 +35,8 @@ import (
 // into Items, and fileee.Company has the exact same MarshalJSON pattern (fileee.CompanyAttributes:
 // IBANs, VAT IDs, emails, phone numbers, websites, German tax IDs). Both are fixed (see
 // documentListBody/mapDocuments in handlers_documents.go, companyListBody/handleListCompanies in
-// handlers_entities.go) by projecting onto dedicated, hand-maintained response DTOs
-// (documentResponseBody, companyResponseBody) that mirror the safe, public fields only.
+// handlers_entities.go) by projecting onto dedicated response DTOs (documentResponseBody,
+// companyResponseBody) that mirror the safe, public fields only.
 //
 // A per-type unit test catches a REGRESSION on a type we already know to check. It does NOT catch
 // a NEW route being added tomorrow with a NEW go-fileee type that happens to carry (now, or in a
@@ -49,29 +48,32 @@ import (
 // this: fileee.Page's flexInt64 fields implement MarshalJSON too, carry no PII at all, and were
 // still replaced — the invariant is kept absolute on purpose, so nobody has to argue a case-by-case
 // exception under time pressure again.)
-var registeredResponseBodyTypes = []reflect.Type{
-	reflect.TypeOf(documentListBody{}),                          // GET /v1/documents
-	reflect.TypeOf(documentResponseBody{}),                      // GET/POST/PUT /v1/documents/{id}
-	reflect.TypeOf([]fileee.OCRToken{}),                         // GET /v1/pages/{pageId}/ocr, GET /v1/share-objects/{token}/pages/{pageId}/ocr
-	reflect.TypeOf(fileee.Process{}),                            // POST /v1/documents/export-zip, GET /v1/processes/{id}, POST /v1/processes/{id}/wait
-	reflect.TypeOf(entityListBody[fileee.Tag]{}),                // GET /v1/tags
-	reflect.TypeOf(companyListBody{}),                           // GET /v1/companies
-	reflect.TypeOf(companyResponseBody{}),                       // GET /v1/companies/{id}
-	reflect.TypeOf(entityListBody[fileee.Contact]{}),            // GET /v1/contacts
-	reflect.TypeOf(entityListBody[fileee.DocumentType]{}),       // GET /v1/document-types
-	reflect.TypeOf(entityListBody[fileee.DocumentTypeScheme]{}), // GET /v1/document-type-schemes
-	reflect.TypeOf(entityListBody[fileee.Reminder]{}),           // GET /v1/reminders
-	reflect.TypeOf(entityListBody[fileee.Box]{}),                // GET /v1/boxes
-	reflect.TypeOf(fileee.Box{}),                                // GET /v1/boxes/{id}
-	reflect.TypeOf(fileee.Reminder{}),                           // POST /v1/reminders, PUT /v1/reminders/{id}
-	reflect.TypeOf(fileee.Contact{}),                            // GET /v1/contacts/{id}, POST /v1/contacts, PUT /v1/contacts/{id}
-	reflect.TypeOf(fileee.Share{}),                              // POST /v1/share
-	reflect.TypeOf(fileee.SharedObject{}),                       // POST /v1/share-objects/{token}
-	reflect.TypeOf(conversationListBody{}),                      // GET /v1/conversations
-	reflect.TypeOf(fileee.Conversation{}),                       // GET /v1/conversations/{id}
-	reflect.TypeOf(entityListBody[fileee.Conversation]{}),       // GET /v1/documents/{id}/conversations, GET /v1/conversations/invitations
-	reflect.TypeOf(fileee.SentMessage{}),                        // POST /v1/conversations/{id}/messages (+ /documents/{docId}, share/unshare variants)
-	reflect.TypeOf(ResolvedDocument{}),                          // POST /v1/resolve
+//
+// # Issue #43: derived from the real registration, not a hand-maintained list
+//
+// Until this fix, the input to this walk was a hand-maintained []reflect.Type literal that a
+// developer had to remember to extend whenever a new route was added. A future "cleanup" that
+// inlines a go-fileee Marshaler type directly into a route's output struct would slip through BOTH
+// the per-type HTTP regression tests (blind to top-level bodies — see pii_leak_regression_test.go,
+// TestGetCompany_NeverLeaksAttributes doc comment) AND this walk, simply because nobody updated the
+// list. registeredResponseBodyTypesFromRealServer closes that gap: it builds an actual *Server,
+// which registers its actual routes through registerOperation (the ONLY sanctioned way to call
+// huma.Register in this codebase, see operation_registry.go), and reads back exactly the body
+// types that registration produced — so a new or changed route is covered automatically, with
+// nothing to remember to update here.
+func registeredResponseBodyTypesFromRealServer(t *testing.T) []reflect.Type {
+	t.Helper()
+
+	var types []reflect.Type
+	operationBodyTypeRecorder = func(rt reflect.Type) { types = append(types, rt) }
+	defer func() { operationBodyTypeRecorder = nil }()
+
+	// AllowDestructive:true captures the three Hard-DELETE routes too (server.go only calls
+	// registerDestructiveRoutes inside that guard) — exhaustiveness over "everything that CAN be
+	// registered", not just the default-config subset.
+	newTestServerWithConfig(t, Config{AllowDestructive: true}, nil)
+
+	return types
 }
 
 // jsonMarshalerType is the reflect.Type of the standard library's json.Marshaler interface —
@@ -151,7 +153,24 @@ func findFileeeMarshalerTypes(t reflect.Type, visited map[reflect.Type]bool, fou
 // MarshalJSON. Run as part of the normal `go test ./...` suite, so it fails at development time,
 // not first in review.
 func TestNoFileeeMarshalerTypeInAnyResponseBody(t *testing.T) {
-	for _, typ := range registeredResponseBodyTypes {
+	all := registeredResponseBodyTypesFromRealServer(t)
+	if len(all) == 0 {
+		t.Fatal("registeredResponseBodyTypesFromRealServer returned nothing — registerOperation wiring itself is broken, this test would otherwise pass vacuously")
+	}
+
+	// Dedupe (several routes legitimately share the same body type, e.g. reminderOutput for both
+	// create-reminder and update-reminder) so each distinct type gets exactly one, stably-named
+	// subtest instead of testing.T auto-suffixing duplicates ("...#01").
+	seen := map[reflect.Type]bool{}
+	unique := make([]reflect.Type, 0, len(all))
+	for _, typ := range all {
+		if !seen[typ] {
+			seen[typ] = true
+			unique = append(unique, typ)
+		}
+	}
+
+	for _, typ := range unique {
 		t.Run(typ.String(), func(t *testing.T) {
 			visited := map[reflect.Type]bool{}
 			found := map[reflect.Type]bool{}
@@ -166,9 +185,10 @@ func TestNoFileeeMarshalerTypeInAnyResponseBody(t *testing.T) {
 			sort.Strings(names)
 			t.Errorf("response body type %s contains go-fileee type(s) with their own MarshalJSON: %v — "+
 				"these bypass json:\"-\" tags and leak EVERYTHING on marshal (see the incident documented "+
-				"on registeredResponseBodyTypes). Project onto a dedicated response DTO instead (see "+
-				"documentResponseBody/newDocumentResponseBody, companyResponseBody/newCompanyResponseBody, "+
-				"pageBody/mapPages for the established pattern).", typ, names)
+				"on registeredResponseBodyTypesFromRealServer). Project onto a dedicated response DTO "+
+				"instead (see documentResponseBody/newDocumentResponseBody, "+
+				"companyResponseBody/newCompanyResponseBody, pageBody/mapPages for the established "+
+				"pattern).", typ, names)
 		})
 	}
 }
