@@ -43,28 +43,28 @@ func uploadSizeLimit(maxBytes int64, next http.Handler) http.Handler {
 // Upload-Duplikat-Fall (uploadDuplicateError), der laut Design-Spec §12 zusätzliche Felder (id,
 // isDuplicate) braucht, die das generische {error,code}-Schema nicht abdeckt.
 func (s *Server) registerDocumentRoutes(api huma.API) {
-	huma.Register(api, huma.Operation{
+	registerOperation(api, huma.Operation{
 		OperationID: "list-documents",
 		Method:      http.MethodGet,
 		Path:        "/v1/documents",
 		Summary:     "Dokumente auflisten oder per Volltextsuche durchsuchen",
 	}, s.handleListDocuments)
 
-	huma.Register(api, huma.Operation{
+	registerOperation(api, huma.Operation{
 		OperationID: "upload-document",
 		Method:      http.MethodPost,
 		Path:        "/v1/documents",
 		Summary:     "Neues Dokument hochladen (multipart)",
 	}, s.handleUploadDocument)
 
-	huma.Register(api, huma.Operation{
+	registerOperation(api, huma.Operation{
 		OperationID: "get-document",
 		Method:      http.MethodGet,
 		Path:        "/v1/documents/{id}",
 		Summary:     "Einzelnes Dokument laden",
 	}, s.handleGetDocument)
 
-	huma.Register(api, huma.Operation{
+	registerOperation(api, huma.Operation{
 		OperationID: "update-document",
 		Method:      http.MethodPut,
 		Path:        "/v1/documents/{id}",
@@ -79,28 +79,28 @@ func (s *Server) registerDocumentRoutes(api huma.API) {
 		SkipValidateBody: true,
 	}, s.handleUpdateDocument)
 
-	huma.Register(api, huma.Operation{
+	registerOperation(api, huma.Operation{
 		OperationID: "download-document-pdf",
 		Method:      http.MethodGet,
 		Path:        "/v1/documents/{id}/pdf",
 		Summary:     "Original-PDF eines Dokuments herunterladen (Stream)",
 	}, s.handleDownloadDocumentPDF)
 
-	huma.Register(api, huma.Operation{
+	registerOperation(api, huma.Operation{
 		OperationID: "download-page-image",
 		Method:      http.MethodGet,
 		Path:        "/v1/pages/{pageId}/image",
 		Summary:     "Seitenbild herunterladen (Fallback ohne PDF, Stream)",
 	}, s.handleDownloadPageImage)
 
-	huma.Register(api, huma.Operation{
+	registerOperation(api, huma.Operation{
 		OperationID: "get-page-ocr",
 		Method:      http.MethodGet,
 		Path:        "/v1/pages/{pageId}/ocr",
 		Summary:     "OCR-Tokens einer Seite laden",
 	}, s.handleGetPageOCR)
 
-	huma.Register(api, huma.Operation{
+	registerOperation(api, huma.Operation{
 		OperationID: "export-documents-zip",
 		Method:      http.MethodPost,
 		Path:        "/v1/documents/export-zip",

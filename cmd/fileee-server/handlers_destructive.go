@@ -27,21 +27,21 @@ import (
 // Standard-Mux, siehe Doku bei den Gate-OFF-Tests in handlers_test.go) — auch das entsteht
 // ausschließlich aus der (Nicht-)Registrierung, nicht aus einem eigenen Handler-Zweig.
 func (s *Server) registerDestructiveRoutes(api huma.API) {
-	huma.Register(api, huma.Operation{
+	registerOperation(api, huma.Operation{
 		OperationID: "delete-document",
 		Method:      http.MethodDelete,
 		Path:        "/v1/documents/{id}",
 		Summary:     "Dokument unwiderruflich löschen (Hard-DELETE, nur bei FILEEE_ALLOW_DESTRUCTIVE)",
 	}, s.handleDeleteDocument)
 
-	huma.Register(api, huma.Operation{
+	registerOperation(api, huma.Operation{
 		OperationID: "delete-contact",
 		Method:      http.MethodDelete,
 		Path:        "/v1/contacts/{id}",
 		Summary:     "Kontakt unwiderruflich löschen (Hard-DELETE, nur bei FILEEE_ALLOW_DESTRUCTIVE)",
 	}, s.handleDeleteContact)
 
-	huma.Register(api, huma.Operation{
+	registerOperation(api, huma.Operation{
 		OperationID: "delete-reminder",
 		Method:      http.MethodDelete,
 		Path:        "/v1/reminders/{id}",

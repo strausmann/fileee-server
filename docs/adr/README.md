@@ -25,7 +25,7 @@ beschreibt) und führt die Nummerierung fort statt neu bei `0001` zu beginnen.
 ## ADR-Regelwerk
 
 - **Was/Wann:** Ein ADR dokumentiert **jede bedeutsame Architektur-, Technologie- oder Betriebs-Entscheidung** samt Kontext und Konsequenzen — damit spätere Sessions und Mitwirkende nachvollziehen können, warum etwas so entschieden wurde. **Nicht** für Trivialitäten, reine Formatierung oder offensichtliche Umsetzungsdetails.
-- **Nummerierung:** fortlaufend `NNNN` (4-stellig), Dateiname `NNNN-kebab-slug.md`. Nummern werden **nie wiederverwendet** — auch nicht für abgelöste/verworfene ADRs. Die Zählung setzt die von go-fileee übernommene Nummer `0008` fort (nächstes neues ADR in diesem Repo: `0009`).
+- **Nummerierung:** fortlaufend `NNNN` (4-stellig), Dateiname `NNNN-kebab-slug.md`. Nummern werden **nie wiederverwendet** — auch nicht für abgelöste/verworfene ADRs. Die Zählung setzt die von go-fileee übernommene Nummer `0008` fort (nächstes neues ADR in diesem Repo: `0010`).
 - **Status-Lifecycle:** `proposed` → `accepted` → (`superseded` | `deprecated`). Ein ADR startet als `proposed`, wird nach Freigabe `accepted`, und geht bei Ablösung/Ungültigkeit in einen der Endzustände über.
 - **Lineage (beidseitig pflegen):** Die Header-Felder `Ersetzt` / `Ersetzt durch` (vollständige Ablösung → Vorgänger auf `superseded` setzen) und `Verwandt` (Querbezug ohne Ablösung) werden **auf beiden beteiligten ADRs** eingetragen. Verweist ein ADR auf ein ADR im go-fileee-Repo (oder umgekehrt), wird die **volle Cross-Repo-URL** verwendet (siehe ADR-0008-Header), keine relativen Pfade. **Beim Ablösen nur den Header** des alten ADR anfassen (Status + `Ersetzt durch`) — Kontext und Entscheidung des alten ADR werden **nie umgeschrieben** (sie sind ein historisches Protokoll).
 - **Registry-Pflicht:** Jedes neue oder im Status geänderte ADR wird **sofort** in die Registry-Tabelle unten eingetragen bzw. aktualisiert (Nr, Titel, Status, Datum). Ein ADR, das nicht in der Registry steht, gilt als „übersehen" und damit als nicht existent.
@@ -36,6 +36,7 @@ beschreibt) und führt die Nummerierung fort statt neu bei `0001` zu beginnen.
 | Nr. | Titel | Status | Datum |
 |-----|-------|--------|-------|
 | [0008](0008-fileee-server.md) | fileee-server — REST-API-Service (Single-Tenant, geguardetes Löschen) | proposed | 2026-07-24 |
+| [0009](0009-response-body-registry-aus-echter-registrierung.md) | DTO-Leak-Guardrail wird aus der echten `huma.Register`-Verdrahtung abgeleitet | proposed | 2026-08-15 |
 
 ## Status-Werte
 
