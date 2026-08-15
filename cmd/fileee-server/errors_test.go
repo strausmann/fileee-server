@@ -1,10 +1,12 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"testing"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -128,6 +130,36 @@ func TestMapError_SessionExpired(t *testing.T) {
 	}
 	if code := wantBody(t, got).ErrorCode; code != "upstream_auth" {
 		t.Errorf("code = %q, want %q", code, "upstream_auth")
+	}
+}
+
+// TestMapError_DeadlineExceeded_Direct belegt die direkte Zuordnung für Issue #44: ein
+// unverpackter context.DeadlineExceeded muss auf 504 "upstream_timeout" abgebildet werden.
+func TestMapError_DeadlineExceeded_Direct(t *testing.T) {
+	got := mapError(context.DeadlineExceeded)
+	if status := wantStatus(t, got); status != http.StatusGatewayTimeout {
+		t.Errorf("status = %d, want %d", status, http.StatusGatewayTimeout)
+	}
+	if code := wantBody(t, got).ErrorCode; code != "upstream_timeout" {
+		t.Errorf("code = %q, want %q", code, "upstream_timeout")
+	}
+}
+
+// TestMapError_DeadlineExceeded_WrappedLikeRealClient bildet nach, wie ein abgelaufener
+// Upstream-Request in der Praxis tatsächlich bei mapError ankommt: go-fileees eigene
+// Fehler-Wraps (fmt.Errorf("fileee: get %s: %w", path, err), fileee/client.go) um einen
+// *url.Error (net/http.Client.Do), der wiederum context.DeadlineExceeded als Ursache trägt
+// (net/url.Error.Unwrap). errors.Is muss das über BEIDE Unwrap-Ebenen hinweg finden.
+func TestMapError_DeadlineExceeded_WrappedLikeRealClient(t *testing.T) {
+	urlErr := &url.Error{Op: "Get", URL: "https://my.fileee.com/api/document-types/rest/query", Err: context.DeadlineExceeded}
+	wrapped := fmt.Errorf("fileee: get %s: %w", "/api/document-types/rest/query", urlErr)
+
+	got := mapError(wrapped)
+	if status := wantStatus(t, got); status != http.StatusGatewayTimeout {
+		t.Errorf("status = %d, want %d", status, http.StatusGatewayTimeout)
+	}
+	if code := wantBody(t, got).ErrorCode; code != "upstream_timeout" {
+		t.Errorf("code = %q, want %q", code, "upstream_timeout")
 	}
 }
 

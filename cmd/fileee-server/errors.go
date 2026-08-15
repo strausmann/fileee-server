@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -80,6 +81,11 @@ func withRetryAfter(err *statusError, seconds int) error {
 //   - fileee.ErrNotFound                    → 404 "not_found"
 //   - fileee.ErrSessionExpired              → 502 "upstream_auth" (Reauth nach Session-Ablauf
 //     endgültig fehlgeschlagen, ADR-0005/fileee/auth.go)
+//   - context.DeadlineExceeded              → 504 "upstream_timeout" (Issue #44: von der
+//     UpstreamTimeout-Middleware gesetzte Request-Deadline lief ab, während der Handler auf eine
+//     Fileee-Antwort wartete — errors.Is findet das über die %w-Unwrap-Kette von go-fileees
+//     eigenen Fehler-Wraps UND über net/url.Error.Unwrap, ohne dass go-fileee dafür etwas
+//     Eigenes exportieren muss)
 //   - sonstiger *fileee.APIError            → dessen eigener HTTPStatus (Pass-Through), Code/
 //     Message der Lib (mit Fallback, falls die Lib defensiv leer geparst hat — siehe
 //     fileee/errors.go parseAPIError)
@@ -114,6 +120,8 @@ func mapError(err error) error {
 		return newStatusError(http.StatusNotFound, "not_found", "resource not found")
 	case errors.Is(err, fileee.ErrSessionExpired):
 		return newStatusError(http.StatusBadGateway, "upstream_auth", "fileee session expired and re-authentication failed")
+	case errors.Is(err, context.DeadlineExceeded):
+		return newStatusError(http.StatusGatewayTimeout, "upstream_timeout", "upstream request timed out")
 	case errors.As(err, &apiErr):
 		code := apiErr.Code
 		if code == "" {

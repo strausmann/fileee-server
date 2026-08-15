@@ -56,6 +56,8 @@ jobs:
           #   infisicalVersionCommand kapseln os.Exit, syscall.Exec und exec.Command und sind
           #   deshalb bewusst ungetestet) gibt es damit keine 0%-Funktion mehr:
           #   handlers_documents.go 90.5→80, handlers_entities.go 98.0→90, errors.go 100.0→90.
+          #   Nachgezogen fuer Issue #44 (Upstream-Timeout): upstream_timeout.go 100.0→90 (neue
+          #   Datei, vollstaendig getestet — Hang-/Zero-Deadline-/Exempt-Faelle).
           ./scripts/coverage-gate-strict.sh cover.out \
             cmd/fileee-server/auth.go:90 \
             cmd/fileee-server/config.go:90 \
@@ -72,7 +74,8 @@ jobs:
             cmd/fileee-server/handlers_documents.go:80 \
             cmd/fileee-server/version.go:90 \
             cmd/fileee-server/banner.go:90 \
-            cmd/fileee-server/selfcheck.go:90
+            cmd/fileee-server/selfcheck.go:90 \
+            cmd/fileee-server/upstream_timeout.go:90
       - name: Doc-Coverage (exportierte Symbole)
         run: |
           chmod +x scripts/doc-coverage.sh

@@ -47,6 +47,18 @@ type mockRoute struct {
 	// "image/jpeg" für ein Seitenbild, "application/pdf" für ein Voll-PDF). Leer = Auto-Verhalten
 	// wie bisher (application/json bei nicht-leerem Body, sonst kein Header).
 	ContentType string
+	// Hang simuliert einen wedged Upstream (Issue #44: Verbindung offen, 0 Bytes, nie eine
+	// Antwort) — der Handler blockiert auf r.Context().Done() und schreibt NIE eine Antwort.
+	// Das entspricht dem live beobachteten Symptom exakt (kein Fehler, kein Timeout auf
+	// Upstream-Seite) und wird erst durch die im Test gesetzte Client-seitige Deadline
+	// (UpstreamTimeout-Middleware) aufgelöst: sobald der Client seinen Request abbricht, schließt
+	// er die Verbindung, wodurch der Server hier den r.Context() als "Done" markiert.
+	Hang bool
+	// DelayUntil verzögert die Fixture-Antwort, bis der Kanal geschlossen wird (oder ein Wert
+	// eingeht) — anders als Hang antwortet die Route DANACH ganz normal mit Status/Body. Gebraucht
+	// um zu belegen, dass eine DEAKTIVIERTE Deadline (UpstreamTimeout=0) einen Upstream, der
+	// lediglich langsam (nicht unbegrenzt) antwortet, nicht vorzeitig abschneidet.
+	DelayUntil <-chan struct{}
 }
 
 // newTestFileeeClient baut EINEN gemeinsamen httptest-Mock-Server und darauf verdrahtet sowohl
@@ -92,6 +104,29 @@ func newTestFileeeClient(t *testing.T, routes map[string]mockRoute) (*fileee.Cli
 	for pattern, route := range routes {
 		route := route
 		mux.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
+			if route.Hang {
+				// Wartet in erster Linie auf r.Context().Done() (feuert, sobald der Client die
+				// Verbindung wegen der abgelaufenen UpstreamTimeout-Deadline abbricht) — der
+				// zusätzliche 2s-Fallback ist ein reines Test-Cleanup-Sicherheitsnetz: auf einer
+				// bereits für einen vorherigen Request (EnsureSession) wiederverwendeten
+				// Keep-Alive-Verbindung propagiert der Verbindungsabbruch bis zur
+				// Context-Cancellation des Handlers nicht immer sofort (Go-net/http-interne
+				// Timing-Eigenheit, kein Verhalten von fileee-server selbst) — ohne diesen
+				// Fallback würde t.Cleanup(mockSrv.Close) (newTestFileeeClient) im schlimmsten
+				// Fall unbegrenzt blockieren, statt nur den Test selbst zu verlangsamen.
+				select {
+				case <-r.Context().Done():
+				case <-time.After(2 * time.Second):
+				}
+				return
+			}
+			if route.DelayUntil != nil {
+				select {
+				case <-route.DelayUntil:
+				case <-r.Context().Done():
+					return
+				}
+			}
 			ct := route.ContentType
 			if ct == "" && len(route.Body) > 0 {
 				ct = "application/json"
