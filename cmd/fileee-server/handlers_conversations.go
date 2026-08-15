@@ -22,21 +22,21 @@ const conversationsCursorEntityType = "Conversation"
 // Lib-Fehler ausschließlich über mapError (errors.go) — die einzige Ausnahme ist die
 // Rollen-Validierung in handleAddParticipant (newStatusError, KEIN Lib-Aufruf bei ungültiger Rolle).
 func (s *Server) registerConversationRoutes(api huma.API) {
-	huma.Register(api, huma.Operation{
+	registerOperation(api, huma.Operation{
 		OperationID: "list-conversations",
 		Method:      http.MethodGet,
 		Path:        "/v1/conversations",
 		Summary:     "Konversationen auflisten (inkrementeller Diff-Sync)",
 	}, s.handleListConversations)
 
-	huma.Register(api, huma.Operation{
+	registerOperation(api, huma.Operation{
 		OperationID: "list-conversation-invitations",
 		Method:      http.MethodGet,
 		Path:        "/v1/conversations/invitations",
 		Summary:     "Offene Einladungen an das eigene Konto auflisten (inkl. Invitation-Token)",
 	}, s.handleListInvitations)
 
-	huma.Register(api, huma.Operation{
+	registerOperation(api, huma.Operation{
 		OperationID: "accept-conversation-invitation",
 		Method:      http.MethodPost,
 		// Pfad bewusst "invitations/accept/{token}" statt des in Brief/Design-Spec §4.1b
@@ -62,49 +62,49 @@ func (s *Server) registerConversationRoutes(api huma.API) {
 		Summary: "Einladung über ihren Invitation-Token annehmen",
 	}, s.handleAcceptInvitation)
 
-	huma.Register(api, huma.Operation{
+	registerOperation(api, huma.Operation{
 		OperationID: "get-conversation",
 		Method:      http.MethodGet,
 		Path:        "/v1/conversations/{id}",
 		Summary:     "Einzelne Konversation laden (inkl. participants[]/messages[])",
 	}, s.handleGetConversation)
 
-	huma.Register(api, huma.Operation{
+	registerOperation(api, huma.Operation{
 		OperationID: "list-document-conversations",
 		Method:      http.MethodGet,
 		Path:        "/v1/documents/{id}/conversations",
 		Summary:     "Konversationen laden, in denen ein Dokument geteilt ist",
 	}, s.handleListDocumentConversations)
 
-	huma.Register(api, huma.Operation{
+	registerOperation(api, huma.Operation{
 		OperationID: "send-conversation-message",
 		Method:      http.MethodPost,
 		Path:        "/v1/conversations/{id}/messages",
 		Summary:     "Text-Chatnachricht in eine Konversation posten",
 	}, s.handleSendMessage)
 
-	huma.Register(api, huma.Operation{
+	registerOperation(api, huma.Operation{
 		OperationID: "share-conversation-document",
 		Method:      http.MethodPost,
 		Path:        "/v1/conversations/{id}/documents/{docId}",
 		Summary:     "Dokument in eine Konversation teilen (DOCUMENT-Chatnachricht)",
 	}, s.handleShareConversationDocument)
 
-	huma.Register(api, huma.Operation{
+	registerOperation(api, huma.Operation{
 		OperationID: "unshare-conversation-document",
 		Method:      http.MethodDelete,
 		Path:        "/v1/conversations/{id}/documents/{docId}",
 		Summary:     "Geteiltes Dokument aus einer Konversation entfernen (kein Destruktiv-Gate, Chat-Entfernung ≠ Dokument-Löschung)",
 	}, s.handleUnshareConversationDocument)
 
-	huma.Register(api, huma.Operation{
+	registerOperation(api, huma.Operation{
 		OperationID: "add-conversation-participant",
 		Method:      http.MethodPost,
 		Path:        "/v1/conversations/{id}/participants",
 		Summary:     "Externen Empfänger per E-Mail in eine Konversation einladen",
 	}, s.handleAddParticipant)
 
-	huma.Register(api, huma.Operation{
+	registerOperation(api, huma.Operation{
 		OperationID: "remove-conversation-participant",
 		Method:      http.MethodDelete,
 		Path:        "/v1/conversations/{id}/participants/{participantId}",

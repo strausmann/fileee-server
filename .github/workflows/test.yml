@@ -56,8 +56,12 @@ jobs:
           #   infisicalVersionCommand kapseln os.Exit, syscall.Exec und exec.Command und sind
           #   deshalb bewusst ungetestet) gibt es damit keine 0%-Funktion mehr:
           #   handlers_documents.go 90.5→80, handlers_entities.go 98.0→90, errors.go 100.0→90.
+          #   Nachgezogen fuer Issue #43 (DTO-Leak-Guardrail aus echter Registrierung):
+          #   operation_registry.go 100.0→90 (neue Datei, registerOperation-Wrapper vollstaendig
+          #   getestet). handlers_entities.go faellt dabei leicht auf 97.5% (weiterhin klar ueber
+          #   der 90%-Schwelle) durch die registerEntityListRoute-Generics-Instrumentierung.
           #   Nachgezogen fuer Issue #44 (Upstream-Timeout): upstream_timeout.go 100.0→90 (neue
-          #   Datei, vollstaendig getestet — Hang-/Zero-Deadline-/Exempt-Faelle).
+          #   Datei, vollstaendig getestet — Hang-/Zero-Deadline-/Exempt-/Suchmodus-Faelle).
           ./scripts/coverage-gate-strict.sh cover.out \
             cmd/fileee-server/auth.go:90 \
             cmd/fileee-server/config.go:90 \
@@ -75,6 +79,7 @@ jobs:
             cmd/fileee-server/version.go:90 \
             cmd/fileee-server/banner.go:90 \
             cmd/fileee-server/selfcheck.go:90 \
+            cmd/fileee-server/operation_registry.go:90 \
             cmd/fileee-server/upstream_timeout.go:90
       - name: Doc-Coverage (exportierte Symbole)
         run: |

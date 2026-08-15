@@ -17,28 +17,28 @@ import (
 // POST /v1/documents/export-zip (handlers_documents.go) nutzt. Jeder Handler delegiert direkt an
 // s.fc und übersetzt Lib-Fehler ausschließlich über mapError (errors.go).
 func (s *Server) registerShareRoutes(api huma.API) {
-	huma.Register(api, huma.Operation{
+	registerOperation(api, huma.Operation{
 		OperationID: "share-documents",
 		Method:      http.MethodPost,
 		Path:        "/v1/share",
 		Summary:     "Freigabe für Dokumente erzeugen",
 	}, s.handleShareDocuments)
 
-	huma.Register(api, huma.Operation{
+	registerOperation(api, huma.Operation{
 		OperationID: "unshare-document",
 		Method:      http.MethodPost,
 		Path:        "/v1/documents/{id}/unshare",
 		Summary:     "Freigabe eines Dokuments widerrufen",
 	}, s.handleUnshareDocument)
 
-	huma.Register(api, huma.Operation{
+	registerOperation(api, huma.Operation{
 		OperationID: "get-process",
 		Method:      http.MethodGet,
 		Path:        "/v1/processes/{id}",
 		Summary:     "Status eines asynchronen Vorgangs abfragen (Poll)",
 	}, s.handleGetProcess)
 
-	huma.Register(api, huma.Operation{
+	registerOperation(api, huma.Operation{
 		OperationID: "wait-process",
 		Method:      http.MethodPost,
 		Path:        "/v1/processes/{id}/wait",
@@ -177,28 +177,28 @@ func (s *Server) handleWaitProcess(ctx context.Context, in *waitProcessInput) (*
 // (fileee.SharedObject.ID/SharedByID) statt des rohen Tokens — das ist eine Eigenheit der
 // zugrunde liegenden Fileee-API (fileee/shareclient.go-Doku), kein Design dieses Servers.
 func (s *Server) registerShareProxyRoutes(api huma.API) {
-	huma.Register(api, huma.Operation{
+	registerOperation(api, huma.Operation{
 		OperationID: "resolve-share",
 		Method:      http.MethodPost,
 		Path:        "/v1/share-objects/{token}",
 		Summary:     "Freigabe-Token auflösen (anonym, ohne Fileee-Login)",
 	}, s.handleResolveShare)
 
-	huma.Register(api, huma.Operation{
+	registerOperation(api, huma.Operation{
 		OperationID: "download-shared-page-image",
 		Method:      http.MethodGet,
 		Path:        "/v1/share-objects/{token}/pages/{pageId}/image",
 		Summary:     "Seitenbild eines geteilten Dokuments herunterladen (anonym, Stream)",
 	}, s.handleDownloadSharedPageImage)
 
-	huma.Register(api, huma.Operation{
+	registerOperation(api, huma.Operation{
 		OperationID: "get-shared-page-ocr",
 		Method:      http.MethodGet,
 		Path:        "/v1/share-objects/{token}/pages/{pageId}/ocr",
 		Summary:     "OCR-Tokens einer Seite eines geteilten Dokuments laden (anonym)",
 	}, s.handleGetSharedPageOCR)
 
-	huma.Register(api, huma.Operation{
+	registerOperation(api, huma.Operation{
 		OperationID: "download-shared-document-pdf",
 		Method:      http.MethodGet,
 		Path:        "/v1/share-objects/{token}/documents/{docId}/pdf",
