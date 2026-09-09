@@ -1,3 +1,9 @@
+## [0.5.2](https://github.com/strausmann/fileee-server/compare/v0.5.1...v0.5.2) (2026-09-09)
+
+### Bug Fixes
+
+* **deps:** update module github.com/strausmann/go-fileee to v0.2.1 ([#48](https://github.com/strausmann/fileee-server/issues/48)) ([efe219c](https://github.com/strausmann/fileee-server/commit/efe219cffa6e8ee0524f1214edb885afc5d31ef6))
+
 ## [0.5.1](https://github.com/strausmann/fileee-server/compare/v0.5.0...v0.5.1) (2026-08-15)
 
 ### Bug Fixes
