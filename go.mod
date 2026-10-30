@@ -3,7 +3,7 @@ module github.com/strausmann/fileee-server
 go 1.26.0
 
 require (
-	github.com/danielgtaylor/huma/v2 v2.39.1
+	github.com/danielgtaylor/huma/v2 v2.40.0
 	github.com/strausmann/go-fileee v0.2.1
 )
 
