@@ -1,9 +1,9 @@
 module github.com/strausmann/fileee-server
 
-go 1.26.0
+go 1.26.10
 
 require (
-	github.com/danielgtaylor/huma/v2 v2.40.0
+	github.com/danielgtaylor/huma/v2 v2.41.0
 	github.com/strausmann/go-fileee v0.2.1
 )
 
